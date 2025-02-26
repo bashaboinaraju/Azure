@@ -10,6 +10,7 @@
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "{client_secret}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
+
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
@@ -21,17 +22,19 @@
         return_content: yes
       register: ritm_response
 
+    - name: Extract requested user ID
+      set_fact:
+        requested_user_id: "{{ ritm_response.json.result[0]['requested_for']['value'] | default('') }}"
+
     - name: Display request details
       debug:
         msg: |
-          {% for request in ritm_response.json.result %}
-          Request Number: {{ request.get('number', 'N/A') }}
-          User ID (Requested For): {{ request.get('requested_for', {}).get('value', 'Unknown') }}
-          User ID (Opened By): {{ request.get('opened_by', {}).get('value', 'Unknown') }}
-          Requested License Type: {{ request.get('short_description', 'Not Provided') }}
-          Description: {{ request.get('description', 'Not Provided') }}
+          Request Number: {{ ritm_response.json.result[0]['number'] }}
+          User ID (Requested For): {{ requested_user_id }}
+          User ID (Opened By): {{ ritm_response.json.result[0]['opened_by']['value'] | default('Unknown') }}
+          Requested License Type: {{ ritm_response.json.result[0]['short_description'] | default('Not Provided') }}
+          Description: {{ ritm_response.json.result[0]['description'] | default('Not Provided') }}
           ------------------------------------------------
-          {% endfor %}
 
     - name: Get Azure access token
       uri:
@@ -50,10 +53,6 @@
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
 
-    - name: Extract requested user ID
-      set_fact:
-        requested_user_id: "{{ ritm_response.json.result[0]['requested_for']['value'] | default('') }}"
-
     - name: Fetch user details from ServiceNow
       when: requested_user_id != ''
       uri:
@@ -65,12 +64,26 @@
         return_content: yes
       register: user_details_response
 
+    - name: Extract user details
+      when: requested_user_id != '' and user_details_response.json.result | length > 0
+      set_fact:
+        user_first_name: "{{ user_details_response.json.result[0]['first_name'] | default('') }}"
+        user_last_name: "{{ user_details_response.json.result[0]['last_name'] | default('') }}"
+        user_display_name: "{{ user_first_name }} {{ user_last_name }}"
+        user_email: "{{ user_details_response.json.result[0]['email'] | default('') }}"
+        user_name: "{{ user_details_response.json.result[0]['user_name'] | default('') }}"
+
     - name: Display fetched user details
       when: requested_user_id != ''
       debug:
-        msg: "User Details: {{ user_details_response.json.result[0] }}"
+        msg: |
+          Name: {{ user_display_name }}
+          Email: {{ user_email }}
+          Username: {{ user_name }}
+          ----------------------------------------
 
     - name: Create user in Azure AD
+      when: user_name != '' and user_email != ''
       uri:
         url: "{{ graph_api_endpoint }}/users"
         method: POST
@@ -79,19 +92,18 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ user_details_response.json.result[0]['name'] }}"
-          mailNickname: "{{ user_details_response.json.result[0]['user_name'] }}"
-          userPrincipalName: "{{ user_details_response.json.result[0]['user_name'] }}@amitomar63gmail.onmicrosoft.com"
+          displayName: "{{ user_display_name }}"
+          mailNickname: "{{ user_name }}"
+          userPrincipalName: "{{ user_name }}@amitomar63gmail.onmicrosoft.com"
           passwordProfile:
             forceChangePasswordNextSignIn: true
             password: "TemporaryP@ssword!"
         body_format: json
         return_content: yes
-        status_code: [200, 201]  # Allow both success codes
+        status_code: [200, 201]
       register: create_user_response
 
-
     - name: Display Azure user creation response
-      when: requested_user_id != ''
+      when: create_user_response.json is defined
       debug:
         msg: "Azure User Created: {{ create_user_response.json }}"
