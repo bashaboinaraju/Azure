@@ -14,7 +14,7 @@
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017&sysparm_display_value=true&sysparm_exclude_reference_link=true"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -23,12 +23,17 @@
       register: ritm_response
       failed_when: ritm_response.json.result is not defined or ritm_response.json.result | length == 0
 
+    - name: Debug Full ServiceNow Response
+      debug:
+        msg: "{{ ritm_response.json.result[0] }}"
+      when: ritm_response.json.result | length > 0
+
     - name: Extract catalog variables from request item
       set_fact:
-        display_name: "{{ ritm_response.json.result[0]['variables'].get('DisplayName', '') }}"
-        mail_nickname: "{{ ritm_response.json.result[0]['variables'].get('mailNickname', '') }}"
-        user_principal_name: "{{ ritm_response.json.result[0]['variables'].get('userPrincipalName', '') }}"
-        user_password: "{{ ritm_response.json.result[0]['variables'].get('Password', 'TemporaryP@ssword!') }}"
+        display_name: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'DisplayName') | map(attribute='value') | first | default('') }}"
+        mail_nickname: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'mailNickname') | map(attribute='value') | first | default('') }}"
+        user_principal_name: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'userPrincipalName') | map(attribute='value') | first | default('') }}"
+        user_password: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'Password') | map(attribute='value') | first | default('TemporaryP@ssword!') }}"
       when: ritm_response.json.result | length > 0
 
     - name: Display extracted user details from catalog variables
