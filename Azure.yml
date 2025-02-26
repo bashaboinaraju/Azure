@@ -65,10 +65,7 @@
     - name: Display fetched user details
       debug:
         msg: "User Details: {{ user_details_response.json.result[0] }}"
-        Name: "{{ user_details_response.json.result[0]['name'] }}"
-        Username: "{{ user_details_response.json.result[0]['user_name'] }}"
-        Email: "{{ user_details_response.json.result[0]['email'] }}"
-        UPN: "{{ user_details_response.json.result[0]['user_name'] }}@amitomar63gmail.onmicrosoft.com"
+  
   
 
     - name: Create user in Azure AD
