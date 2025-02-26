@@ -6,27 +6,25 @@
     servicenow_instance: "https://dev247928.service-now.com"
     servicenow_username: "admin"
     servicenow_password: "%ml4Vs9RXE/s"
-    servicenow_table: "sc_request"
     tenant_id: "195e8969-c853-47b4-83d0-36e044d83923"
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
-    client_secret: {client_secret}
+    client_secret: "{client_secret}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
   tasks:
-    - name: Fetch pending requests for 'azure_ad' from ServiceNow
+    - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=cat_item.name=azure_ad^stateIN1,2"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
-      register: servicenow_response
-
+      register: ritm_response
 
     - name: Display request details
       debug:
         msg: |
-          {% for request in servicenow_response.json.result %}
+          {% for request in ritm_response.json.result %}
           Request Number: {{ request.get('number', 'N/A') }}
           User ID (Requested For): {{ request.get('requested_for', {}).get('value', 'Unknown') }}
           User ID (Opened By): {{ request.get('opened_by', {}).get('value', 'Unknown') }}
@@ -52,9 +50,14 @@
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
 
-    - name: Fetch user details from ServiceNow request
+    - name: Extract requested user ID
+      set_fact:
+        requested_user_id: "{{ ritm_response.json.result[0]['requested_for']['value'] | default('') }}"
+
+    - name: Fetch user details from ServiceNow
+      when: requested_user_id != ''
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sys_user?sys_id={{ servicenow_response.json.result[0]['requested_for']['value'] }}"
+        url: "{{ servicenow_instance }}/api/now/table/sys_user?sysparm_query=sys_id={{ requested_user_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -63,12 +66,12 @@
       register: user_details_response
 
     - name: Display fetched user details
+      when: requested_user_id != ''
       debug:
         msg: "User Details: {{ user_details_response.json.result[0] }}"
-  
-  
 
     - name: Create user in Azure AD
+      when: requested_user_id != ''
       uri:
         url: "{{ graph_api_endpoint }}/users"
         method: POST
@@ -88,5 +91,6 @@
       register: create_user_response
 
     - name: Display Azure user creation response
+      when: requested_user_id != ''
       debug:
         msg: "Azure User Created: {{ create_user_response.json }}"
