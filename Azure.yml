@@ -1,0 +1,89 @@
+---
+- name: Fetch Pending ServiceNow Requests and Create Users in Azure
+  hosts: localhost
+  gather_facts: no
+  vars:
+    servicenow_instance: "https://dev247928.service-now.com"
+    servicenow_username: "admin"
+    servicenow_password: "%ml4Vs9RXE/s"
+    servicenow_table: "sc_request"
+    tenant_id: "195e8969-c853-47b4-83d0-36e044d83923"
+    client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
+    client_secret: {client_secret}
+    graph_api_endpoint: "https://graph.microsoft.com/v1.0"
+  tasks:
+    - name: Fetch pending requests from ServiceNow
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/{{ servicenow_table }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: servicenow_response
+
+    - name: Display request details
+      debug:
+        msg: |
+          {% for request in servicenow_response.json.result %}
+          Request Number: {{ request.get('number', 'N/A') }}
+          User ID (Requested For): {{ request.get('requested_for', {}).get('value', 'Unknown') }}
+          User ID (Opened By): {{ request.get('opened_by', {}).get('value', 'Unknown') }}
+          Requested License Type: {{ request.get('short_description', 'Not Provided') }}
+          Description: {{ request.get('description', 'Not Provided') }}
+          ------------------------------------------------
+          {% endfor %}
+
+    - name: Get Azure access token
+      uri:
+        url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
+        method: POST
+        body:
+          client_id: "{{ client_id }}"
+          client_secret: "{{ client_secret }}"
+          scope: "https://graph.microsoft.com/.default"
+          grant_type: "client_credentials"
+        body_format: form-urlencoded
+        return_content: yes
+      register: azure_auth_response
+
+    - name: Set Azure token
+      set_fact:
+        access_token: "{{ azure_auth_response.json.access_token }}"
+
+    - name: Fetch user details from ServiceNow request
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sys_user?sys_id={{ servicenow_response.json.result[0]['requested_for']['value'] }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: user_details_response
+
+    - name: Display fetched user details
+      debug:
+        msg: "User Details: {{ user_details_response.json.result[0] }}"
+
+    - name: Create user in Azure AD
+      uri:
+        url: "{{ graph_api_endpoint }}/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        body:
+          accountEnabled: true
+          displayName: "{{ user_details_response.json.result[0]['name'] }}"
+          mailNickname: "{{ user_details_response.json.result[0]['user_name'] }}"
+          userPrincipalName: "{{ user_details_response.json.result[0]['email'] }}"
+          passwordProfile:
+            forceChangePasswordNextSignIn: true
+            password: "TemporaryP@ssword!"
+        body_format: json
+        return_content: yes
+      register: create_user_response
+
+    - name: Display Azure user creation response
+      debug:
+        msg: "Azure User Created: {{ create_user_response.json }}"
