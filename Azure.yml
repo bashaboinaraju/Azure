@@ -12,15 +12,16 @@
     client_secret: {client_secret}
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
   tasks:
-    - name: Fetch pending requests from ServiceNow
+    - name: Fetch pending requests for 'azure_ad' from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/{{ servicenow_table }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=cat_item.name=azure_ad^stateIN1,2"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
       register: servicenow_response
+
 
     - name: Display request details
       debug:
