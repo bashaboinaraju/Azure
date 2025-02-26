@@ -23,21 +23,22 @@
       register: ritm_response
       failed_when: ritm_response.json.result is not defined or ritm_response.json.result | length == 0
 
-    - name: Extract requested user ID
+    - name: Extract catalog variables from request item
       set_fact:
-        requested_user_id: "{{ ritm_response.json.result[0].get('requested_for', {}).get('value', '') }}"
+        display_name: "{{ ritm_response.json.result[0]['variables'].get('DisplayName', '') }}"
+        mail_nickname: "{{ ritm_response.json.result[0]['variables'].get('mailNickname', '') }}"
+        user_principal_name: "{{ ritm_response.json.result[0]['variables'].get('userPrincipalName', '') }}"
+        user_password: "{{ ritm_response.json.result[0]['variables'].get('Password', 'TemporaryP@ssword!') }}"
       when: ritm_response.json.result | length > 0
 
-    - name: Display request details
+    - name: Display extracted user details from catalog variables
       debug:
         msg: |
-          Request Number: {{ ritm_response.json.result[0].get('number', 'N/A') }}
-          User ID (Requested For): {{ requested_user_id }}
-          User ID (Opened By): {{ ritm_response.json.result[0].get('opened_by', {}).get('value', 'Unknown') }}
-          Requested License Type: {{ ritm_response.json.result[0].get('short_description', 'Not Provided') }}
-          Description: {{ ritm_response.json.result[0].get('description', 'Not Provided') }}
-          ------------------------------------------------
-      when: ritm_response.json.result | length > 0
+          Extracted User Details:
+          Display Name: {{ display_name }}
+          Mail Nickname: {{ mail_nickname }}
+          User Principal Name: {{ user_principal_name }}
+          Password: {{ user_password }}
 
     - name: Get Azure access token
       uri:
@@ -57,45 +58,8 @@
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
 
-    - name: Fetch user details from ServiceNow
-      when: requested_user_id != ''
-      uri:
-        url: "{{ servicenow_instance }}/api/now/table/sys_user?sysparm_query=sys_id={{ requested_user_id }}"
-        method: GET
-        user: "{{ servicenow_username }}"
-        password: "{{ servicenow_password }}"
-        force_basic_auth: yes
-        return_content: yes
-      register: user_details_response
-      failed_when: user_details_response.json.result is not defined or user_details_response.json.result | length == 0
-
-    - name: Display raw user details from ServiceNow
-      when: requested_user_id != ''
-      debug:
-        msg: "{{ user_details_response.json.result }}"
-
-    - name: Ensure user details exist before extracting
-      when: requested_user_id != '' and user_details_response.json.result | length > 0
-      set_fact:
-        user_first_name: "{{ user_details_response.json.result[0].get('first_name', '') }}"
-        user_last_name: "{{ user_details_response.json.result[0].get('last_name', '') }}"
-        user_display_name: "{{ user_details_response.json.result[0].get('name', '') }}"
-        user_email: "{{ user_details_response.json.result[0].get('email', '') }}"
-        user_name: "{{ user_details_response.json.result[0].get('user_name', '') }}"
-
-    - name: Validate extracted user details
-      when: requested_user_id != ''
-      debug:
-        msg: |
-          Extracted User Details:
-          First Name: {{ user_first_name }}
-          Last Name: {{ user_last_name }}
-          Display Name: {{ user_display_name }}
-          Email: {{ user_email }}
-          Username: {{ user_name }}
-
     - name: Create user in Azure AD
-      when: user_name != '' and user_email != ''
+      when: display_name != '' and mail_nickname != '' and user_principal_name != ''
       uri:
         url: "{{ graph_api_endpoint }}/users"
         method: POST
@@ -104,12 +68,12 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ user_display_name }}"
-          mailNickname: "{{ user_name }}"
-          userPrincipalName: "{{ user_name }}@amitomar63gmail.onmicrosoft.com"
+          displayName: "{{ display_name }}"
+          mailNickname: "{{ mail_nickname }}"
+          userPrincipalName: "{{ user_principal_name }}"
           passwordProfile:
             forceChangePasswordNextSignIn: true
-            password: "TemporaryP@ssword!"
+            password: "{{ user_password }}"
         body_format: json
         return_content: yes
         status_code: [200, 201]
