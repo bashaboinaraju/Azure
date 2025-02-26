@@ -65,6 +65,11 @@
     - name: Display fetched user details
       debug:
         msg: "User Details: {{ user_details_response.json.result[0] }}"
+        Name: "{{ user_details_response.json.result[0]['name'] }}"
+        Username: "{{ user_details_response.json.result[0]['user_name'] }}"
+        Email: "{{ user_details_response.json.result[0]['email'] }}"
+        UPN: "{{ user_details_response.json.result[0]['user_name'] }}@amitomar63gmail.onmicrosoft.com"
+  
 
     - name: Create user in Azure AD
       uri:
@@ -77,7 +82,7 @@
           accountEnabled: true
           displayName: "{{ user_details_response.json.result[0]['name'] }}"
           mailNickname: "{{ user_details_response.json.result[0]['user_name'] }}"
-          userPrincipalName: "{{ user_details_response.json.result[0]['email'] }}"
+          userPrincipalName: "{{ user_details_response.json.result[0]['user_name'] }}@amitomar63gmail.onmicrosoft.com"
           passwordProfile:
             forceChangePasswordNextSignIn: true
             password: "TemporaryP@ssword!"
