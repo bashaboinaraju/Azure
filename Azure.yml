@@ -64,14 +64,31 @@
         return_content: yes
       register: user_details_response
 
-    - name: Extract user details
+    - name: Display raw user details from ServiceNow
+      when: requested_user_id != ''
+      debug:
+        msg: "{{ user_details_response.json.result }}"
+
+    - name: Ensure user details exist before extracting
       when: requested_user_id != '' and user_details_response.json.result | length > 0
       set_fact:
-        user_first_name: "{{ user_details_response.json.result[0]['first_name'] | default('') }}"
-        user_last_name: "{{ user_details_response.json.result[0]['last_name'] | default('') }}"
-        user_display_name: "{{ user_first_name }} {{ user_last_name }}"
-        user_email: "{{ user_details_response.json.result[0]['email'] | default('') }}"
-        user_name: "{{ user_details_response.json.result[0]['user_name'] | default('') }}"
+        user_first_name: "{{ user_details_response.json.result[0].get('first_name', '') }}"
+        user_last_name: "{{ user_details_response.json.result[0].get('last_name', '') }}"
+        user_display_name: "{{ user_first_name }} {{ user_last_name }}".strip()
+        user_email: "{{ user_details_response.json.result[0].get('email', '') }}"
+        user_name: "{{ user_details_response.json.result[0].get('user_name', '') }}"
+
+    - name: Validate extracted user details
+      when: requested_user_id != ''
+      debug:
+        msg: |
+          Extracted User Details:
+          First Name: {{ user_first_name }}
+          Last Name: {{ user_last_name }}
+          Display Name: {{ user_display_name }}
+          Email: {{ user_email }}
+          Username: {{ user_name }}
+
 
     - name: Display fetched user details
       when: requested_user_id != ''
