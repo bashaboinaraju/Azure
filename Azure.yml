@@ -21,20 +21,23 @@
         force_basic_auth: yes
         return_content: yes
       register: ritm_response
+      failed_when: ritm_response.json.result is not defined or ritm_response.json.result | length == 0
 
     - name: Extract requested user ID
       set_fact:
-        requested_user_id: "{{ ritm_response.json.result[0]['requested_for']['value'] | default('') }}"
+        requested_user_id: "{{ ritm_response.json.result[0].get('requested_for', {}).get('value', '') }}"
+      when: ritm_response.json.result | length > 0
 
     - name: Display request details
       debug:
         msg: |
-          Request Number: {{ ritm_response.json.result[0]['number'] }}
+          Request Number: {{ ritm_response.json.result[0].get('number', 'N/A') }}
           User ID (Requested For): {{ requested_user_id }}
-          User ID (Opened By): {{ ritm_response.json.result[0]['opened_by']['value'] | default('Unknown') }}
-          Requested License Type: {{ ritm_response.json.result[0]['short_description'] | default('Not Provided') }}
-          Description: {{ ritm_response.json.result[0]['description'] | default('Not Provided') }}
+          User ID (Opened By): {{ ritm_response.json.result[0].get('opened_by', {}).get('value', 'Unknown') }}
+          Requested License Type: {{ ritm_response.json.result[0].get('short_description', 'Not Provided') }}
+          Description: {{ ritm_response.json.result[0].get('description', 'Not Provided') }}
           ------------------------------------------------
+      when: ritm_response.json.result | length > 0
 
     - name: Get Azure access token
       uri:
@@ -48,6 +51,7 @@
         body_format: form-urlencoded
         return_content: yes
       register: azure_auth_response
+      failed_when: azure_auth_response.json.access_token is not defined
 
     - name: Set Azure token
       set_fact:
@@ -63,6 +67,7 @@
         force_basic_auth: yes
         return_content: yes
       register: user_details_response
+      failed_when: user_details_response.json.result is not defined or user_details_response.json.result | length == 0
 
     - name: Display raw user details from ServiceNow
       when: requested_user_id != ''
@@ -74,7 +79,7 @@
       set_fact:
         user_first_name: "{{ user_details_response.json.result[0].get('first_name', '') }}"
         user_last_name: "{{ user_details_response.json.result[0].get('last_name', '') }}"
-        user_display_name: "{{ user_first_name }} {{ user_last_name }}".strip()
+        user_display_name: "{{ user_details_response.json.result[0].get('name', '') }}"
         user_email: "{{ user_details_response.json.result[0].get('email', '') }}"
         user_name: "{{ user_details_response.json.result[0].get('user_name', '') }}"
 
@@ -88,16 +93,6 @@
           Display Name: {{ user_display_name }}
           Email: {{ user_email }}
           Username: {{ user_name }}
-
-
-    - name: Display fetched user details
-      when: requested_user_id != ''
-      debug:
-        msg: |
-          Name: {{ user_display_name }}
-          Email: {{ user_email }}
-          Username: {{ user_name }}
-          ----------------------------------------
 
     - name: Create user in Azure AD
       when: user_name != '' and user_email != ''
@@ -119,6 +114,7 @@
         return_content: yes
         status_code: [200, 201]
       register: create_user_response
+      failed_when: create_user_response.json.id is not defined
 
     - name: Display Azure user creation response
       when: create_user_response.json is defined
