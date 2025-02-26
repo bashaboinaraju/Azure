@@ -23,20 +23,36 @@
       register: ritm_response
       failed_when: ritm_response.json.result is not defined or ritm_response.json.result | length == 0
 
-    - name: Debug Full ServiceNow Response
-      debug:
-        msg: "{{ ritm_response.json.result[0] }}"
-      when: ritm_response.json.result | length > 0
-
-    - name: Extract catalog variables from request item
+    - name: Extract sys_id from request item
       set_fact:
-        display_name: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'DisplayName') | map(attribute='value') | first | default('') }}"
-        mail_nickname: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'mailNickname') | map(attribute='value') | first | default('') }}"
-        user_principal_name: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'userPrincipalName') | map(attribute='value') | first | default('') }}"
-        user_password: "{{ ritm_response.json.result[0]['sc_item_options'] | selectattr('name', 'equalto', 'Password') | map(attribute='value') | first | default('TemporaryP@ssword!') }}"
+        request_item_sys_id: "{{ ritm_response.json.result[0]['sys_id'] }}"
       when: ritm_response.json.result | length > 0
 
-    - name: Display extracted user details from catalog variables
+    - name: Fetch catalog variables from ServiceNow
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_item_option?sysparm_query=request_item={{ request_item_sys_id }}&sysparm_display_value=true"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: catalog_response
+      failed_when: catalog_response.json.result is not defined or catalog_response.json.result | length == 0
+
+    - name: Debug Full Catalog Variables Response
+      debug:
+        msg: "{{ catalog_response.json.result }}"
+      when: catalog_response.json.result | length > 0
+
+    - name: Extract catalog variables
+      set_fact:
+        display_name: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'DisplayName') | map(attribute='value') | first | default('') }}"
+        mail_nickname: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'mailNickname') | map(attribute='value') | first | default('') }}"
+        user_principal_name: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'userPrincipalName') | map(attribute='value') | first | default('') }}"
+        user_password: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'Password') | map(attribute='value') | first | default('TemporaryP@ssword!') }}"
+      when: catalog_response.json.result | length > 0
+
+    - name: Display extracted user details
       debug:
         msg: |
           Extracted User Details:
@@ -44,48 +60,3 @@
           Mail Nickname: {{ mail_nickname }}
           User Principal Name: {{ user_principal_name }}
           Password: {{ user_password }}
-
-    - name: Get Azure access token
-      uri:
-        url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
-        method: POST
-        body:
-          client_id: "{{ client_id }}"
-          client_secret: "{{ client_secret }}"
-          scope: "https://graph.microsoft.com/.default"
-          grant_type: "client_credentials"
-        body_format: form-urlencoded
-        return_content: yes
-      register: azure_auth_response
-      failed_when: azure_auth_response.json.access_token is not defined
-
-    - name: Set Azure token
-      set_fact:
-        access_token: "{{ azure_auth_response.json.access_token }}"
-
-    - name: Create user in Azure AD
-      when: display_name != '' and mail_nickname != '' and user_principal_name != ''
-      uri:
-        url: "{{ graph_api_endpoint }}/users"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        body:
-          accountEnabled: true
-          displayName: "{{ display_name }}"
-          mailNickname: "{{ mail_nickname }}"
-          userPrincipalName: "{{ user_principal_name }}"
-          passwordProfile:
-            forceChangePasswordNextSignIn: true
-            password: "{{ user_password }}"
-        body_format: json
-        return_content: yes
-        status_code: [200, 201]
-      register: create_user_response
-      failed_when: create_user_response.json.id is not defined
-
-    - name: Display Azure user creation response
-      when: create_user_response.json is defined
-      debug:
-        msg: "Azure User Created: {{ create_user_response.json }}"
