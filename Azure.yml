@@ -10,53 +10,88 @@
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "{client_secret}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
-
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017&sysparm_display_value=true&sysparm_exclude_reference_link=true"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
       register: ritm_response
-      failed_when: ritm_response.json.result is not defined or ritm_response.json.result | length == 0
-
-    - name: Extract sys_id from request item
-      set_fact:
-        request_item_sys_id: "{{ ritm_response.json.result[0]['sys_id'] }}"
-      when: ritm_response.json.result | length > 0
-
-    - name: Fetch catalog variables from ServiceNow
+ 
+    - name: Display request details
+      debug:
+        msg: |
+          {% for request in ritm_response.json.result %}
+          Request Number: {{ request.get('number', 'N/A') }}
+          User ID (Requested For): {{ request.get('requested_for', {}).get('value', 'Unknown') }}
+          User ID (Opened By): {{ request.get('opened_by', {}).get('value', 'Unknown') }}
+          Requested License Type: {{ request.get('short_description', 'Not Provided') }}
+          Description: {{ request.get('description', 'Not Provided') }}
+          ------------------------------------------------
+          {% endfor %}
+ 
+    - name: Get Azure access token
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_item_option?sysparm_query=request_item={{ request_item_sys_id }}&sysparm_display_value=true"
+        url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
+        method: POST
+        body:
+          client_id: "{{ client_id }}"
+          client_secret: "{{ client_secret }}"
+          scope: "https://graph.microsoft.com/.default"
+          grant_type: "client_credentials"
+        body_format: form-urlencoded
+        return_content: yes
+      register: azure_auth_response
+ 
+    - name: Set Azure token
+      set_fact:
+        access_token: "{{ azure_auth_response.json.access_token }}"
+ 
+    - name: Extract requested user ID
+      set_fact:
+        requested_user_id: "{{ ritm_response.json.result[0]['requested_for']['value'] | default('') }}"
+ 
+    - name: Fetch user details from ServiceNow
+      when: requested_user_id != ''
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sys_user?sysparm_query=sys_id={{ requested_user_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
-      register: catalog_response
-      failed_when: catalog_response.json.result is not defined or catalog_response.json.result | length == 0
-
-    - name: Debug Full Catalog Variables Response
+      register: user_details_response
+ 
+    - name: Display fetched user details
+      when: requested_user_id != ''
       debug:
-        msg: "{{ catalog_response.json.result }}"
-      when: catalog_response.json.result | length > 0
-
-    - name: Extract catalog variables
-      set_fact:
-        display_name: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'DisplayName') | map(attribute='value') | first | default('') }}"
-        mail_nickname: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'mailNickname') | map(attribute='value') | first | default('') }}"
-        user_principal_name: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'userPrincipalName') | map(attribute='value') | first | default('') }}"
-        user_password: "{{ catalog_response.json.result | selectattr('item_option_new.name', 'equalto', 'Password') | map(attribute='value') | first | default('TemporaryP@ssword!') }}"
-      when: catalog_response.json.result | length > 0
-
-    - name: Display extracted user details
+        msg: "User Details: {{ user_details_response.json.result[0] }}"
+ 
+    - name: Create user in Azure AD
+      uri:
+        url: "{{ graph_api_endpoint }}/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        body:
+          accountEnabled: true
+          displayName: "{{ user_details_response.json.result[0]['name'] }}"
+          mailNickname: "{{ user_details_response.json.result[0]['user_name'] }}"
+          userPrincipalName: "{{ user_details_response.json.result[0]['user_name'] }}@amitomar63gmail.onmicrosoft.com"
+          passwordProfile:
+            forceChangePasswordNextSignIn: true
+            password: "TemporaryP@ssword!"
+        body_format: json
+        return_content: yes
+        status_code: [200, 201]  # Allow both success codes
+      register: create_user_response
+ 
+ 
+    - name: Display Azure user creation response
+      when: requested_user_id != ''
       debug:
-        msg: |
-          Extracted User Details:
-          Display Name: {{ display_name }}
-          Mail Nickname: {{ mail_nickname }}
-          User Principal Name: {{ user_principal_name }}
-          Password: {{ user_password }}
+        msg: "Azure User Created: {{ create_user_response.json }}"
