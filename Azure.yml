@@ -13,7 +13,7 @@
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010027"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -21,17 +21,46 @@
         return_content: yes
       register: ritm_response
  
+    - name: Fetch catalog item variables
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_item_option_mtom?sysparm_query=request_item={{ ritm_response.json.result[0].sys_id }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: variables_response
+ 
+    - name: Extract variable values
+      set_fact:
+        catalog_variables: "{{ {} }}"
+      
+    - name: Process each variable
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_item_option?sysparm_query=sys_id={{ item.sc_item_option.value }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: variable_details
+      loop: "{{ variables_response.json.result }}"
+      
+    - name: Map variable values
+      set_fact:
+        catalog_variables: "{{ catalog_variables | combine({variable_details.results[idx].json.result[0].item_option_new.display_value: variable_details.results[idx].json.result[0].value}) }}"
+      loop_control:
+        index_var: idx
+      loop: "{{ variables_response.json.result }}"
+ 
     - name: Display request details
       debug:
         msg: |
-          {% for request in ritm_response.json.result %}
-          Request Number: {{ request.get('number', 'N/A') }}
-          User ID (Requested For): {{ request.get('requested_for', {}).get('value', 'Unknown') }}
-          User ID (Opened By): {{ request.get('opened_by', {}).get('value', 'Unknown') }}
-          Requested License Type: {{ request.get('short_description', 'Not Provided') }}
-          Description: {{ request.get('description', 'Not Provided') }}
-          ------------------------------------------------
-          {% endfor %}
+          Request Number: {{ ritm_response.json.result[0].number }}
+          DisplayName: {{ catalog_variables.DisplayName | default('N/A') }}
+          mailNickname: {{ catalog_variables.mailNickname | default('N/A') }}
+          userPrincipalName: {{ catalog_variables.userPrincipalName | default('N/A') }}
+          Password: ********
  
     - name: Get Azure access token
       uri:
@@ -50,26 +79,6 @@
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
  
-    - name: Extract requested user ID
-      set_fact:
-        requested_user_id: "{{ ritm_response.json.result[0]['requested_for']['value'] | default('') }}"
- 
-    - name: Fetch user details from ServiceNow
-      when: requested_user_id != ''
-      uri:
-        url: "{{ servicenow_instance }}/api/now/table/sys_user?sysparm_query=sys_id={{ requested_user_id }}"
-        method: GET
-        user: "{{ servicenow_username }}"
-        password: "{{ servicenow_password }}"
-        force_basic_auth: yes
-        return_content: yes
-      register: user_details_response
- 
-    - name: Display fetched user details
-      when: requested_user_id != ''
-      debug:
-        msg: "User Details: {{ user_details_response.json.result[0] }}"
- 
     - name: Create user in Azure AD
       uri:
         url: "{{ graph_api_endpoint }}/users"
@@ -79,19 +88,31 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ user_details_response.json.result[0]['name'] }}"
-          mailNickname: "{{ user_details_response.json.result[0]['user_name'] }}"
-          userPrincipalName: "{{ user_details_response.json.result[0]['user_name'] }}@amitomar63gmail.onmicrosoft.com"
+          displayName: "{{ catalog_variables.DisplayName }}"
+          mailNickname: "{{ catalog_variables.mailNickname }}"
+          userPrincipalName: "{{ catalog_variables.userPrincipalName }}"
           passwordProfile:
             forceChangePasswordNextSignIn: true
-            password: "TemporaryP@ssword!"
+            password: "{{ catalog_variables.Password | default('TemporaryP@ssword!') }}"
         body_format: json
         return_content: yes
         status_code: [200, 201]  # Allow both success codes
       register: create_user_response
  
+    - name: Update ServiceNow request item with completion status
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item/{{ ritm_response.json.result[0].sys_id }}"
+        method: PATCH
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        body:
+          state: "3"  # Closed Complete
+          work_notes: "User created in Azure AD: {{ create_user_response.json.userPrincipalName }}"
+        body_format: json
+        status_code: 200
+      when: create_user_response is defined and create_user_response.status == 201
  
     - name: Display Azure user creation response
-      when: requested_user_id != ''
       debug:
         msg: "Azure User Created: {{ create_user_response.json }}"
