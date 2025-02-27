@@ -14,7 +14,7 @@
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010027"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010028"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
