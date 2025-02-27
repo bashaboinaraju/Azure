@@ -101,9 +101,11 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ catalog_variables['Display Name'] }}"
-          mailNickname: "{{ catalog_variables['Nickname'] }}"
-          userPrincipalName: "{{ catalog_variables['userprincipalname'] }}"
+          displayName: "{{ catalog_variables['DisplayName'] }}"
+          FirstName: "{{ catalog_variables['firstname'] | default('') }}"
+          LastName: "{{ catalog_variables['lastname'] | default('') }}"
+          mailNickname: "{{ catalog_variables['mailNickname'] }}"
+          userPrincipalName: "{{ catalog_variables['userPrincipalName'] }}"
           passwordProfile:
             forceChangePasswordNextSignIn: true
             password: "{{ catalog_variables['Password'] }}"
