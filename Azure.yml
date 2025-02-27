@@ -31,13 +31,14 @@
         return_content: yes
       register: variables_response
  
-    - name: Extract variable values
+    - name: Initialize catalog variables
       set_fact:
-        catalog_variables: "{{ {} }}"
+        catalog_variables: {}
+        variable_data: []
       
-    - name: Process each variable
+    - name: Fetch variable details for each option
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_item_option?sysparm_query=sys_id={{ item.sc_item_option.value }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_item_option/{{ item.sc_item_option.value }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -46,21 +47,34 @@
       register: variable_details
       loop: "{{ variables_response.json.result }}"
       
-    - name: Map variable values
+    - name: Store variable details for processing
       set_fact:
-        catalog_variables: "{{ catalog_variables | combine({variable_details.results[idx].json.result[0].item_option_new.display_value: variable_details.results[idx].json.result[0].value}) }}"
+        variable_data: "{{ variable_data + [variable_details] }}"
+      loop: "{{ variable_details.results }}"
+      loop_control:
+        loop_var: variable_details
+        
+    - name: Fetch variable names
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/item_option_new/{{ item.json.result[0].item_option_new.value }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: option_details
+      loop: "{{ variable_details.results }}"
+      
+    - name: Map variable values to names
+      set_fact:
+        catalog_variables: "{{ catalog_variables | combine({option_details.results[idx].json.result[0].question_text: variable_details.results[idx].json.result[0].value}) }}"
+      loop: "{{ range(0, option_details.results | length) | list }}"
       loop_control:
         index_var: idx
-      loop: "{{ variables_response.json.result }}"
  
-    - name: Display request details
+    - name: Display extracted variables
       debug:
-        msg: |
-          Request Number: {{ ritm_response.json.result[0].number }}
-          DisplayName: {{ catalog_variables.DisplayName | default('N/A') }}
-          mailNickname: {{ catalog_variables.mailNickname | default('N/A') }}
-          userPrincipalName: {{ catalog_variables.userPrincipalName | default('N/A') }}
-          Password: ********
+        var: catalog_variables
  
     - name: Get Azure access token
       uri:
