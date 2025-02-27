@@ -9,13 +9,13 @@
     tenant_id: "195e8969-c853-47b4-83d0-36e044d83923"
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "{client_secret}"
-    sys_id: "{sys_id}"
+    sys_id: "2d313b54830c6210d081f696feaad3c5"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     catalog_variables: {}
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number={{sys_id}}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number={{ sys_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
