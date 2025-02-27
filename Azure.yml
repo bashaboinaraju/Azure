@@ -9,13 +9,19 @@
     tenant_id: "195e8969-c853-47b4-83d0-36e044d83923"
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "{client_secret}"
-    sys_id: "{sys_id}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     catalog_variables: {}
+    # These will be provided as input when running the playbook
+    request_id: "{request_id}"  # Can be RITM number or sys_id
   tasks:
+    - name: Set query parameter based on input format
+      set_fact:
+        query_param: >-
+          {% if request_id.startswith('RITM') %}number={{ request_id }}{% else %}sys_id={{ request_id }}{% endif %}
+
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number={{ sys_id }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query={{ query_param }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -95,12 +101,12 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ catalog_variables.DisplayName }}"
-          mailNickname: "{{ catalog_variables.mailNickname }}"
-          userPrincipalName: "{{ catalog_variables.userPrincipalName }}"
+          displayName: "{{ catalog_variables['Display Name'] }}"
+          mailNickname: "{{ catalog_variables['Nickname'] }}"
+          userPrincipalName: "{{ catalog_variables['userprincipalname'] }}"
           passwordProfile:
             forceChangePasswordNextSignIn: true
-            password: "{{ catalog_variables.Password | default('TemporaryP@ssword!') }}"
+            password: "{{ catalog_variables['Password'] }}"
         body_format: json
         return_content: yes
         status_code: [200, 201]  # Allow both success codes
