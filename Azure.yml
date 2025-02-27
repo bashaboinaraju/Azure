@@ -102,8 +102,8 @@
         body:
           accountEnabled: true
           displayName: "{{ catalog_variables['DisplayName'] }}"
-          FirstName: "{{ catalog_variables['firstname'] | default('') }}"
-          LastName: "{{ catalog_variables['lastname'] | default('') }}"
+          surname: "{{ catalog_variables['firstname'] | default('') }}"
+          givenName: "{{ catalog_variables['lastname'] | default('') }}"
           mailNickname: "{{ catalog_variables['mailNickname'] }}"
           userPrincipalName: "{{ catalog_variables['userPrincipalName'] }}"
           passwordProfile:
