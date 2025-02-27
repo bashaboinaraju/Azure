@@ -10,10 +10,11 @@
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "{client_secret}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
+    catalog_variables: {}
   tasks:
     - name: Fetch requested item details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010027"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=number=RITM0010017"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -30,11 +31,6 @@
         force_basic_auth: yes
         return_content: yes
       register: variables_response
- 
-    - name: Initialize catalog variables
-      set_fact:
-        catalog_variables: {}
-        variable_data: []
       
     - name: Fetch variable details for each option
       uri:
@@ -44,34 +40,30 @@
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
-      register: variable_details
+      register: option_value_details
       loop: "{{ variables_response.json.result }}"
       
-    - name: Store variable details for processing
+    - name: Extract variable values and IDs
       set_fact:
-        variable_data: "{{ variable_data + [variable_details] }}"
-      loop: "{{ variable_details.results }}"
-      loop_control:
-        loop_var: variable_details
-        
-    - name: Fetch variable names
+        variable_values: "{{ variable_values | default([]) + [{'value': item.json.result.value, 'item_option_id': item.json.result.item_option_new.value}] }}"
+      loop: "{{ option_value_details.results }}"
+      
+    - name: Fetch variable names for each option
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/item_option_new/{{ item.json.result[0].item_option_new.value }}"
+        url: "{{ servicenow_instance }}/api/now/table/item_option_new/{{ item.item_option_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
-      register: option_details
-      loop: "{{ variable_details.results }}"
+      register: option_name_details
+      loop: "{{ variable_values }}"
       
-    - name: Map variable values to names
+    - name: Create catalog variables dictionary
       set_fact:
-        catalog_variables: "{{ catalog_variables | combine({option_details.results[idx].json.result[0].question_text: variable_details.results[idx].json.result[0].value}) }}"
-      loop: "{{ range(0, option_details.results | length) | list }}"
-      loop_control:
-        index_var: idx
- 
+        catalog_variables: "{{ catalog_variables | combine({item.0.json.result.question_text: item.1.value}) }}"
+      loop: "{{ option_name_details.results | zip(variable_values) | list }}"
+      
     - name: Display extracted variables
       debug:
         var: catalog_variables
