@@ -168,15 +168,15 @@
         role_id: "{{ catalog_variables['RoleID'] | trim }}"
       when: catalog_variables['RoleID'] is defined
 
-    - name: Find role ID by name
-      set_fact:
-        role_id: "{{ (item.id | trim) }}"
-      loop: "{{ roles_response.json.value }}"
-      when: 
-        - catalog_variables['RoleID'] is not defined 
-        - catalog_variables['RoleName'] is defined
-        - item.displayName == catalog_variables['RoleName']
-      register: role_lookup_result
+    - name: Display roles response for debugging
+  debug:
+    var: roles_response.json.value
+  when: roles_response is defined
+
+- name: Debug role name being searched
+  debug:
+    msg: "Looking for role with name: {{ catalog_variables['RoleName'] }}"
+  when: catalog_variables['RoleName'] is defined
 
     - name: Activate directory role by template if needed
       uri:
