@@ -28,19 +28,9 @@
         return_content: yes
       register: req_response
  
-    - name: Fetch request items associated with the request
+    - name: Fetch variables directly from request
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=request={{ req_response.json.result[0].sys_id }}"
-        method: GET
-        user: "{{ servicenow_username }}"
-        password: "{{ servicenow_password }}"
-        force_basic_auth: yes
-        return_content: yes
-      register: ritm_response
-      
-    - name: Fetch catalog item variables
-      uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_item_option_mtom?sysparm_query=request_item={{ ritm_response.json.result[0].sys_id }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item_option_mtom?sysparm_query=request={{ req_response.json.result[0].sys_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -50,7 +40,7 @@
       
     - name: Fetch variable details for each option
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_item_option/{{ item.sc_item_option.value }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item_option/{{ item.sc_req_item_option.value }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
@@ -61,12 +51,12 @@
       
     - name: Extract variable values and IDs
       set_fact:
-        variable_values: "{{ variable_values | default([]) + [{'value': item.json.result.value, 'item_option_id': item.json.result.item_option_new.value}] }}"
+        variable_values: "{{ variable_values | default([]) + [{'value': item.json.result.value, 'variable_id': item.json.result.item_option_new.value}] }}"
       loop: "{{ option_value_details.results }}"
       
     - name: Fetch variable names for each option
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/item_option_new/{{ item.item_option_id }}"
+        url: "{{ servicenow_instance }}/api/now/table/item_option_new/{{ item.variable_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
