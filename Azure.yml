@@ -16,18 +16,28 @@
     - name: Set query parameter based on input format
       set_fact:
         query_param: >-
-          {% if request_id.startswith('RITM') %}number={{ request_id }}{% else %}sys_id={{ request_id }}{% endif %}
+          {% if request_id.startswith('REQ') %}number={{ request_id }}{% else %}sys_id={{ request_id }}{% endif %}
 
-    - name: Fetch requested item details from ServiceNow
+    - name: Fetch request details from ServiceNow
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query={{ query_param }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_request?sysparm_query={{ query_param }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: req_response
+ 
+    - name: Fetch request items associated with the request
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=request={{ req_response.json.result[0].sys_id }}"
         method: GET
         user: "{{ servicenow_username }}"
         password: "{{ servicenow_password }}"
         force_basic_auth: yes
         return_content: yes
       register: ritm_response
- 
+      
     - name: Fetch catalog item variables
       uri:
         url: "{{ servicenow_instance }}/api/now/table/sc_item_option_mtom?sysparm_query=request_item={{ ritm_response.json.result[0].sys_id }}"
