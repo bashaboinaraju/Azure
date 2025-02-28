@@ -199,12 +199,19 @@
     - name: Set role ID from activated role
       set_fact:
         role_id: "{{ role_activation_response.json.id }}"
-      when: role_activation_response is defined and role_activation_response.status == 201
+      when: role_activation_response is defined and role_activation_response.json is defined
 
     - name: Display role ID for debugging
       debug:
         var: role_id
       when: role_id is defined
+
+    - name: Add user to Azure AD role (if no lookup or template available, use default Role)
+      set_fact:
+        role_id: "{{ catalog_variables['Role'] | trim }}"
+      when: 
+        - role_id is not defined or role_id | trim == ""
+        - catalog_variables['Role'] is defined
 
     - name: Add user to Azure AD role
       uri:
