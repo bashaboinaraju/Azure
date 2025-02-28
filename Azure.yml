@@ -127,15 +127,12 @@
 
     - name: Set group ID from lookup or direct input
       set_fact:
-        group_id: >-
-          {% if catalog_variables['GroupID'] is defined %}{{ catalog_variables['GroupID'] }}
-          {% elif catalog_variables['GroupName'] is defined and group_lookup_response.json.value | length > 0 %}{{ group_lookup_response.json.value[0].id }}
-          {% else %}{% endif %}
+        group_id: "{% if catalog_variables['GroupID'] is defined %}{{ catalog_variables['GroupID'] | trim }}{% elif catalog_variables['GroupName'] is defined and group_lookup_response.json.value | length > 0 %}{{ group_lookup_response.json.value[0].id | trim }}{% else %}{% endif %}"
       when: catalog_variables['GroupID'] is defined or catalog_variables['GroupName'] is defined
 
     - name: Add user to Azure AD group
       uri:
-        url: "{{ graph_api_endpoint }}/groups/{{ group_id }}/members/$ref"
+        url: "{{ graph_api_endpoint }}/groups/{{ group_id | trim }}/members/$ref"
         method: POST
         headers:
           Authorization: "Bearer {{ access_token }}"
@@ -145,7 +142,7 @@
         body_format: json
         status_code: [204]
       register: add_to_group_response
-      when: create_user_response is defined and create_user_response.status in [200, 201] and group_id is defined
+      when: create_user_response is defined and create_user_response.status in [200, 201] and group_id is defined and group_id | trim != ""
       ignore_errors: yes
 
     - name: Get role ID by name if needed
@@ -159,20 +156,19 @@
       register: roles_response
       when: catalog_variables['RoleName'] is defined
 
+    - name: Extract role ID from name
+      set_fact:
+        role_id_from_name: "{{ (roles_response.json.value | selectattr('displayName', 'equalto', catalog_variables['RoleName']) | list)[0].id | default('') }}"
+      when: catalog_variables['RoleName'] is defined and roles_response.json.value | length > 0
+
     - name: Set role ID from direct input or lookup
       set_fact:
-        role_id: >-
-          {% if catalog_variables['RoleID'] is defined %}{{ catalog_variables['RoleID'] }}
-          {% elif catalog_variables['RoleName'] is defined %}
-          {% for role in roles_response.json.value %}
-          {% if role.displayName == catalog_variables['RoleName'] %}{{ role.id }}{% endif %}
-          {% endfor %}
-          {% else %}{% endif %}
-      when: catalog_variables['RoleID'] is defined or catalog_variables['RoleName'] is defined
+        role_id: "{% if catalog_variables['RoleID'] is defined %}{{ catalog_variables['RoleID'] | trim }}{% elif role_id_from_name is defined %}{{ role_id_from_name | trim }}{% else %}{% endif %}"
+      when: catalog_variables['RoleID'] is defined or (catalog_variables['RoleName'] is defined and role_id_from_name is defined)
 
     - name: Add user to Azure AD role
       uri:
-        url: "{{ graph_api_endpoint }}/directoryRoles/{{ role_id }}/members/$ref"
+        url: "{{ graph_api_endpoint }}/directoryRoles/{{ role_id | trim }}/members/$ref"
         method: POST
         headers:
           Authorization: "Bearer {{ access_token }}"
@@ -182,7 +178,7 @@
         body_format: json
         status_code: [204]
       register: add_to_role_response
-      when: create_user_response is defined and create_user_response.status in [200, 201] and role_id is defined
+      when: create_user_response is defined and create_user_response.status in [200, 201] and role_id is defined and role_id | trim != ""
       ignore_errors: yes
  
     - name: Update ServiceNow request item with completion status
@@ -194,26 +190,12 @@
         force_basic_auth: yes
         body:
           state: "3"  # Closed Complete
-          work_notes: >-
-            User created in Azure AD: {{ create_user_response.json.userPrincipalName }}
-            {% if group_id is defined %}
-            Group assignment status: {{ 'Success' if add_to_group_response.status == 204 else 'Failed' }}
-            {% endif %}
-            {% if role_id is defined %}
-            Role assignment status: {{ 'Success' if add_to_role_response.status == 204 else 'Failed' }}
-            {% endif %}
+          work_notes: "User created in Azure AD: {{ create_user_response.json.userPrincipalName }}{% if group_id is defined and group_id | trim != '' %}\nGroup assignment status: {{ 'Success' if add_to_group_response.status == 204 else 'Failed' }}{% endif %}{% if role_id is defined and role_id | trim != '' %}\nRole assignment status: {{ 'Success' if add_to_role_response.status == 204 else 'Failed' }}{% endif %}"
         body_format: json
         status_code: 200
       when: create_user_response is defined and create_user_response.status in [200, 201]
  
     - name: Display Azure user creation and assignment response
       debug:
-        msg: |
-          Azure User Created: {{ create_user_response.json }}
-          {% if group_id is defined %}
-          Group Assignment: {{ 'Success' if add_to_group_response.status == 204 else 'Failed' }}
-          {% endif %}
-          {% if role_id is defined %}
-          Role Assignment: {{ 'Success' if add_to_role_response.status == 204 else 'Failed' }}
-          {% endif %}
+        msg: "Azure User Created: {{ create_user_response.json }}{% if group_id is defined and group_id | trim != '' %}\nGroup Assignment: {{ 'Success' if add_to_group_response.status == 204 else 'Failed' }}{% endif %}{% if role_id is defined and role_id | trim != '' %}\nRole Assignment: {{ 'Success' if add_to_role_response.status == 204 else 'Failed' }}{% endif %}"
       when: create_user_response is defined and create_user_response.status in [200, 201]
