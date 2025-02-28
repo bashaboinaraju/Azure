@@ -11,8 +11,7 @@
     client_secret: "{client_secret}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     catalog_variables: {}
-    request_id: "{request_id}"  # Can be RITM number or sys_id
-
+    request_id: "{request_id}"
   tasks:
     - name: Set query parameter based on input format
       set_fact:
@@ -28,7 +27,7 @@
         force_basic_auth: yes
         return_content: yes
       register: ritm_response
-
+ 
     - name: Fetch catalog item variables
       uri:
         url: "{{ servicenow_instance }}/api/now/table/sc_item_option_mtom?sysparm_query=request_item={{ ritm_response.json.result[0].sys_id }}"
@@ -38,7 +37,7 @@
         force_basic_auth: yes
         return_content: yes
       register: variables_response
-
+      
     - name: Fetch variable details for each option
       uri:
         url: "{{ servicenow_instance }}/api/now/table/sc_item_option/{{ item.sc_item_option.value }}"
@@ -49,12 +48,12 @@
         return_content: yes
       register: option_value_details
       loop: "{{ variables_response.json.result }}"
-
+      
     - name: Extract variable values and IDs
       set_fact:
         variable_values: "{{ variable_values | default([]) + [{'value': item.json.result.value, 'item_option_id': item.json.result.item_option_new.value}] }}"
       loop: "{{ option_value_details.results }}"
-
+      
     - name: Fetch variable names for each option
       uri:
         url: "{{ servicenow_instance }}/api/now/table/item_option_new/{{ item.item_option_id }}"
@@ -65,16 +64,16 @@
         return_content: yes
       register: option_name_details
       loop: "{{ variable_values }}"
-
+      
     - name: Create catalog variables dictionary
       set_fact:
         catalog_variables: "{{ catalog_variables | combine({item.0.json.result.question_text: item.1.value}) }}"
       loop: "{{ option_name_details.results | zip(variable_values) | list }}"
-
+      
     - name: Display extracted variables
       debug:
         var: catalog_variables
-
+ 
     - name: Get Azure access token
       uri:
         url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
@@ -87,11 +86,11 @@
         body_format: form-urlencoded
         return_content: yes
       register: azure_auth_response
-
+ 
     - name: Set Azure token
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
-
+ 
     - name: Create user in Azure AD
       uri:
         url: "{{ graph_api_endpoint }}/users"
@@ -114,21 +113,46 @@
         status_code: [200, 201]
       register: create_user_response
 
-    - name: Display Azure user creation response
-      debug:
-        msg: "Azure User Created: {{ create_user_response.json }}"
-      when: create_user_response is defined and create_user_response.status in [200, 201]
-
-    - name: Update ServiceNow request item with completion status
+    # Group assignment section
+    - name: Get group ID by name if needed
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item/{{ ritm_response.json.result[0].sys_id }}"
-        method: PATCH
-        user: "{{ servicenow_username }}"
-        password: "{{ servicenow_password }}"
-        force_basic_auth: yes
+        url: "{{ graph_api_endpoint }}/groups?$filter=displayName eq '{{ catalog_variables['GroupName'] }}'"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: group_lookup_response
+      when: catalog_variables['GroupID'] is not defined and catalog_variables['GroupName'] is defined
+
+    - name: Set group ID from lookup or direct input
+      set_fact:
+        group_id: "{% if catalog_variables['GroupID'] is defined %}{{ catalog_variables['GroupID'] | trim }}{% elif catalog_variables['GroupName'] is defined and group_lookup_response.json.value | length > 0 %}{{ group_lookup_response.json.value[0].id | trim }}{% else %}{% endif %}"
+      when: catalog_variables['GroupID'] is defined or catalog_variables['GroupName'] is defined
+
+    - name: Add user to Azure AD group
+      uri:
+        url: "{{ graph_api_endpoint }}/groups/{{ group_id | trim }}/members/$ref"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
         body:
-          state: "3"  # Closed Complete
-          work_notes: "User created in Azure AD: {{ create_user_response.json.userPrincipalName }}"
+          "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ create_user_response.json.id }}"
         body_format: json
-        status_code: 200
+        status_code: [204]
+      register: add_to_group_response
+      when: create_user_response is defined and create_user_response.status in [200, 201] and group_id is defined and group_id | trim != ""
+      ignore_errors: yes
+      
+    # Role assignment section
+    - name: Get directory roles (always execute)
+      uri:
+        url: "{{ graph_api_endpoint }}/directoryRoles"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: roles_response
       when: create_user_response is defined and create_user_response.status in [200, 201]
