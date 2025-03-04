@@ -6,15 +6,23 @@
     servicenow_instance: "https://dev247928.service-now.com"
     servicenow_username: "admin"
     servicenow_password: "%ml4Vs9RXE/s"
-    servicenow_table: "sc_request"
     tenant_id: "195e8969-c853-47b4-83d0-36e044d83923"
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "PQZ8Q~XSmMsU4dbgk2KyWMHK1h8X7ciD~H.1_csi"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
-    default_user_name: "{{ awx_webhook_payload.displayName}}"
-    default_mail_nickname: "{{ awx_webhook_payload.mailNickname}}"
+    default_user_name: "{{ awx_webhook_payload.displayName }}"
+    default_mail_nickname: "{{ awx_webhook_payload.mailNickname }}"
+    default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
+    default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
+    domain: "amitomar63gmail.onmicrosoft.com"
  
   tasks:
+    - name: Parse Display Name into First and Last Name
+      set_fact:
+        first_name: "{{ default_user_name.split(' ')[0] }}"
+        last_name: "{{ default_user_name.split(' ')[1:] | join(' ') }}"
+      when: default_user_name is defined and ' ' in default_user_name
+
     - name: Get Azure access token
       uri:
         url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
@@ -31,10 +39,10 @@
     - name: Set Azure token
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
- 
+
     - name: Check if user exists in Azure AD
       uri:
-        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@amitomar63gmail.onmicrosoft.com"
+        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
         method: GET
         headers:
           Authorization: "Bearer {{ access_token }}"
@@ -43,10 +51,6 @@
         return_content: yes
       register: user_check
       ignore_errors: yes
- 
-    - name: Debug - Show User Check Results
-      debug:
-        var: user_check
  
     - name: Create User in Azure AD if Not Exists
       uri:
@@ -58,8 +62,10 @@
         body:
           accountEnabled: true
           displayName: "{{ default_user_name }}"
+          givenName: "{{ first_name | default(default_user_name) }}"
+          surname: "{{ last_name | default('') }}"
           mailNickname: "{{ default_mail_nickname }}"
-          userPrincipalName: "{{ default_mail_nickname }}@amitomar63gmail.onmicrosoft.com"
+          userPrincipalName: "{{ default_mail_nickname }}@{{ domain }}"
           passwordProfile:
             forceChangePasswordNextSignIn: true
             password: "Default@1234"
@@ -67,3 +73,65 @@
         status_code: [201]
       register: user_creation
       when: user_check.status == 404
+
+    - name: Get Group ID by Name
+      uri:
+        url: "{{ graph_api_endpoint }}/groups?$filter=displayName eq '{{ default_group_name }}'"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: group_lookup
+      when: default_group_name is defined and default_group_name != ''
+
+    - name: Add User to Group
+      uri:
+        url: "{{ graph_api_endpoint }}/groups/{{ group_lookup.json.value[0].id }}/members/$ref"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        body:
+          "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+        body_format: json
+        status_code: [204]
+      when: 
+        - user_creation.status == 201
+        - group_lookup is defined
+        - group_lookup.json.value | length > 0
+
+    - name: Get Directory Role by Name
+      uri:
+        url: "{{ graph_api_endpoint }}/directoryRoles?$filter=displayName eq '{{ default_role_name }}'"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: role_lookup
+      when: default_role_name is defined and default_role_name != ''
+
+    - name: Assign Directory Role to User
+      uri:
+        url: "{{ graph_api_endpoint }}/directoryRoles/{{ role_lookup.json.value[0].id }}/members/$ref"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        body:
+          "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+        body_format: json
+        status_code: [204]
+      when: 
+        - user_creation.status == 201
+        - role_lookup is defined
+        - role_lookup.json.value | length > 0
+
+    - name: Debug Information
+      debug:
+        msg:
+          - "First Name: {{ first_name | default('Not Set') }}"
+          - "Last Name: {{ last_name | default('Not Set') }}"
+          - "Group: {{ default_group_name | default('No Group Specified') }}"
+          - "Role: {{ default_role_name | default('No Role Specified') }}"
