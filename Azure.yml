@@ -10,13 +10,28 @@
     client_id: "e2e46ae3-2dee-4eed-a074-ddffd760ab2b"
     client_secret: "PQZ8Q~XSmMsU4dbgk2KyWMHK1h8X7ciD~H.1_csi"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
-    default_user_name: "{{ awx_webhook_payload.displayName }}"
-    default_mail_nickname: "{{ awx_webhook_payload.mailNickname }}"
-    default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
-    default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
     domain: "amitomar63gmail.onmicrosoft.com"
  
   tasks:
+    - name: Print Complete Webhook Payload
+      debug:
+        var: awx_webhook_payload
+
+    - name: Set Payload Variables
+      set_fact:
+        default_user_name: "{{ awx_webhook_payload.displayName | default('') }}"
+        default_mail_nickname: "{{ awx_webhook_payload.mailNickname | default('') }}"
+        default_group_name: "{{ awx_webhook_payload.group | default('') }}"
+        default_role_name: "{{ awx_webhook_payload.role | default('') }}"
+
+    - name: Debug Parsed Variables
+      debug:
+        msg:
+          - "Display Name: {{ default_user_name }}"
+          - "Mail Nickname: {{ default_mail_nickname }}"
+          - "Group Name: {{ default_group_name }}"
+          - "Role Name: {{ default_role_name }}"
+
     - name: Parse Display Name into First and Last Name
       set_fact:
         first_name: "{{ default_user_name.split(' ')[0] }}"
@@ -74,7 +89,7 @@
       register: user_creation
       when: user_check.status == 404
 
-    - name: Lookup Group ID
+    - name: Group Lookup and Assignment
       block:
         - name: Get Group ID by Name
           uri:
@@ -121,7 +136,7 @@
           debug:
             msg: "Failed to lookup or add to group: {{ default_group_name }}"
 
-    - name: Lookup and Assign Role
+    - name: Role Lookup and Assignment
       block:
         - name: Get Directory Role by Name
           uri:
