@@ -74,61 +74,101 @@
       register: user_creation
       when: user_check.status == 404
 
-    - name: Get Group ID by Name
-      uri:
-        url: "{{ graph_api_endpoint }}/groups?$filter=displayName eq '{{ default_group_name }}'"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        return_content: yes
-      register: group_lookup
-      when: default_group_name is defined and default_group_name != ''
+    - name: Lookup Group ID
+      block:
+        - name: Get Group ID by Name
+          uri:
+            url: "{{ graph_api_endpoint }}/groups?$filter=displayName eq '{{ default_group_name }}'"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: group_lookup
+          when: default_group_name is defined and default_group_name != ''
 
-    - name: Add User to Group
-      uri:
-        url: "{{ graph_api_endpoint }}/groups/{{ group_lookup.json.value[0].id }}/members/$ref"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        body:
-          "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
-        body_format: json
-        status_code: [204]
-      when: 
-        - user_creation.status == 201
-        - group_lookup is defined
-        - group_lookup.json.value | length > 0
+        - name: Debug Group Lookup
+          debug:
+            var: group_lookup
+          when: group_lookup is defined
 
-    - name: Get Directory Role by Name
-      uri:
-        url: "{{ graph_api_endpoint }}/directoryRoles?$filter=displayName eq '{{ default_role_name }}'"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        return_content: yes
-      register: role_lookup
-      when: default_role_name is defined and default_role_name != ''
+        - name: Add User to Group
+          uri:
+            url: "{{ graph_api_endpoint }}/groups/{{ group_lookup.json.value[0].id }}/members/$ref"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            body:
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+            body_format: json
+            status_code: [204]
+          when: 
+            - user_creation is defined
+            - user_creation.status == 201
+            - group_lookup is defined
+            - group_lookup.json is defined
+            - group_lookup.json.value | length > 0
+          register: group_add_result
 
-    - name: Assign Directory Role to User
-      uri:
-        url: "{{ graph_api_endpoint }}/directoryRoles/{{ role_lookup.json.value[0].id }}/members/$ref"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        body:
-          "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
-        body_format: json
-        status_code: [204]
-      when: 
-        - user_creation.status == 201
-        - role_lookup is defined
-        - role_lookup.json.value | length > 0
+        - name: Debug Group Add Result
+          debug:
+            var: group_add_result
+          when: group_add_result is defined
 
-    - name: Debug Information
+      rescue:
+        - name: Group Lookup Failure
+          debug:
+            msg: "Failed to lookup or add to group: {{ default_group_name }}"
+
+    - name: Lookup and Assign Role
+      block:
+        - name: Get Directory Role by Name
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles?$filter=displayName eq '{{ default_role_name }}'"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: role_lookup
+          when: default_role_name is defined and default_role_name != ''
+
+        - name: Debug Role Lookup
+          debug:
+            var: role_lookup
+          when: role_lookup is defined
+
+        - name: Assign Directory Role to User
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles/{{ role_lookup.json.value[0].id }}/members/$ref"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            body:
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+            body_format: json
+            status_code: [204]
+          when: 
+            - user_creation is defined
+            - user_creation.status == 201
+            - role_lookup is defined
+            - role_lookup.json is defined
+            - role_lookup.json.value | length > 0
+          register: role_assign_result
+
+        - name: Debug Role Assign Result
+          debug:
+            var: role_assign_result
+          when: role_assign_result is defined
+
+      rescue:
+        - name: Role Lookup Failure
+          debug:
+            msg: "Failed to lookup or assign role: {{ default_role_name }}"
+
+    - name: Final Debug Information
       debug:
         msg:
           - "First Name: {{ first_name | default('Not Set') }}"
