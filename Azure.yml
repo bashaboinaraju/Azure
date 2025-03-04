@@ -13,16 +13,12 @@
     domain: "amitomar63gmail.onmicrosoft.com"
  
   tasks:
-    - name: Print Complete Webhook Payload
-      debug:
-        var: awx_webhook_payload
-
     - name: Set Payload Variables
       set_fact:
         default_user_name: "{{ awx_webhook_payload.displayName | default('') }}"
         default_mail_nickname: "{{ awx_webhook_payload.mailNickname | default('') }}"
-        default_group_name: "{{ awx_webhook_payload.group | default('') }}"
-        default_role_name: "{{ awx_webhook_payload.role | default('') }}"
+        default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
+        default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
 
     - name: Debug Parsed Variables
       debug:
