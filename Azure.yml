@@ -18,7 +18,7 @@
         default_user_name: "{{ awx_webhook_payload.displayName | default('') }}"
         default_mail_nickname: "{{ awx_webhook_payload.mailNickname | default('') }}"
         default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
-        default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
+        default_role_name: "{{ awx_webhook_payload.roleName | default('AI Administrator') }}"
 
     - name: Debug Parsed Variables
       debug:
