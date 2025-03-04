@@ -87,9 +87,13 @@
 
     - name: Group Lookup and Assignment
       block:
+        - name: Encode Group Name for URL
+          set_fact:
+            encoded_group_name: "{{ default_group_name | urlencode }}"
+
         - name: Get Group ID by Name
           uri:
-            url: "{{ graph_api_endpoint }}/groups?$filter=displayName eq '{{ default_group_name }}'"
+            url: "{{ graph_api_endpoint }}/groups?$filter=displayName%20eq%20'{{ encoded_group_name }}'"
             method: GET
             headers:
               Authorization: "Bearer {{ access_token }}"
@@ -134,9 +138,13 @@
 
     - name: Role Lookup and Assignment
       block:
+        - name: Encode Role Name for URL
+          set_fact:
+            encoded_role_name: "{{ default_role_name | urlencode }}"
+
         - name: Get Directory Role by Name
           uri:
-            url: "{{ graph_api_endpoint }}/directoryRoles?$filter=displayName eq '{{ default_role_name }}'"
+            url: "{{ graph_api_endpoint }}/directoryRoles?$filter=displayName%20eq%20'{{ encoded_role_name }}'"
             method: GET
             headers:
               Authorization: "Bearer {{ access_token }}"
