@@ -34,10 +34,58 @@
         last_name: "{{ default_user_name.split(' ')[1:] | join(' ') }}"
       when: default_user_name is defined and ' ' in default_user_name
 
-    # ... [previous tasks remain the same until Group Lookup and Assignment block]
+    - name: Get Azure access token
+      uri:
+        url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
+        method: POST
+        body:
+          client_id: "{{ client_id }}"
+          client_secret: "{{ client_secret }}"
+          scope: "https://graph.microsoft.com/.default"
+          grant_type: "client_credentials"
+        body_format: form-urlencoded
+        return_content: yes
+      register: azure_auth_response
 
-    - name: Group Lookup and Assignment
-      block:
+    - name: Set Azure token
+      set_fact:
+        access_token: "{{ azure_auth_response.json.access_token }}"
+
+    - name: Check if user exists in Azure AD
+      uri:
+        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        status_code: [200, 404]
+        return_content: yes
+      register: user_check
+      ignore_errors: yes
+
+    - name: Create User in Azure AD if Not Exists
+      uri:
+        url: "{{ graph_api_endpoint }}/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        body:
+          accountEnabled: true
+          displayName: "{{ default_user_name }}"
+          givenName: "{{ first_name | default(default_user_name) }}"
+          surname: "{{ last_name | default('') }}"
+          mailNickname: "{{ default_mail_nickname }}"
+          userPrincipalName: "{{ default_mail_nickname }}@{{ domain }}"
+          passwordProfile:
+            forceChangePasswordNextSignIn: true
+            password: "Default@1234"
+        body_format: json
+        status_code: [201]
+      register: user_creation
+      when: user_check.status == 404
+
+    - block:
         - name: Encode Group Name for URL
           set_fact:
             encoded_group_name: "{{ default_group_name | urlencode }}"
@@ -87,8 +135,7 @@
           debug:
             msg: "Failed to lookup or add to group: {{ default_group_name }}"
 
-    - name: Role Lookup and Assignment
-      block:
+    - block:
         - name: List All Available Directory Roles
           uri:
             url: "{{ graph_api_endpoint }}/directoryRoles"
