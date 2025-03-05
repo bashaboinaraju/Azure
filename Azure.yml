@@ -51,7 +51,7 @@
 
     - name: Check if user exists in Azure AD
       uri:
-        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
+        url: "{{ graph_api_endpoint }}/users/{{ default_user_name}}@{{ domain }}"
         method: GET
         headers:
           Authorization: "Bearer {{ access_token }}"
