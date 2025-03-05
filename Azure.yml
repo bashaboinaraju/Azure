@@ -34,56 +34,7 @@
         last_name: "{{ default_user_name.split(' ')[1:] | join(' ') }}"
       when: default_user_name is defined and ' ' in default_user_name
 
-    - name: Get Azure access token
-      uri:
-        url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
-        method: POST
-        body:
-          client_id: "{{ client_id }}"
-          client_secret: "{{ client_secret }}"
-          scope: "https://graph.microsoft.com/.default"
-          grant_type: "client_credentials"
-        body_format: form-urlencoded
-        return_content: yes
-      register: azure_auth_response
- 
-    - name: Set Azure token
-      set_fact:
-        access_token: "{{ azure_auth_response.json.access_token }}"
-
-    - name: Check if user exists in Azure AD
-      uri:
-        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        status_code: [200, 404]
-        return_content: yes
-      register: user_check
-      ignore_errors: yes
- 
-    - name: Create User in Azure AD if Not Exists
-      uri:
-        url: "{{ graph_api_endpoint }}/users"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        body:
-          accountEnabled: true
-          displayName: "{{ default_user_name }}"
-          givenName: "{{ first_name | default(default_user_name) }}"
-          surname: "{{ last_name | default('') }}"
-          mailNickname: "{{ default_mail_nickname }}"
-          userPrincipalName: "{{ default_mail_nickname }}@{{ domain }}"
-          passwordProfile:
-            forceChangePasswordNextSignIn: true
-            password: "Default@1234"
-        body_format: json
-        status_code: [201]
-      register: user_creation
-      when: user_check.status == 404
+    # ... [previous tasks remain the same until Group Lookup and Assignment block]
 
     - name: Group Lookup and Assignment
       block:
@@ -136,111 +87,106 @@
           debug:
             msg: "Failed to lookup or add to group: {{ default_group_name }}"
 
-        - name: Role Lookup and Assignment
-          block:
-            - name: List All Available Directory Roles
-              uri:
-                url: "{{ graph_api_endpoint }}/directoryRoles"
-                method: GET
-                headers:
-                  Authorization: "Bearer {{ access_token }}"
-                  Content-Type: "application/json"
-                return_content: yes
-              register: available_roles
-              when: access_token is defined
-        
-            - name: Debug Available Roles
-              debug:
-                msg: "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list }}"
-              when: available_roles is defined
-        
-            - name: Encode Role Name for URL
-              set_fact:
-                encoded_role_name: "{{ default_role_name | urlencode }}"
-        
-            - name: Get Specific Directory Role Template
-              uri:
-                url: "{{ graph_api_endpoint }}/directoryRoleTemplates"
-                method: GET
-                headers:
-                  Authorization: "Bearer {{ access_token }}"
-                  Content-Type: "application/json"
-                return_content: yes
-              register: role_templates
-              when: default_role_name is defined and default_role_name != ''
-        
-            - name: Debug Role Templates
-              debug:
-                msg: "Role Templates: {{ role_templates.json.value | map(attribute='displayName') | list }}"
-              when: role_templates is defined
-        
-            - name: Activate Directory Role if Not Active
-              uri:
-                url: "{{ graph_api_endpoint }}/directoryRoles"
-                method: POST
-                headers:
-                  Authorization: "Bearer {{ access_token }}"
-                  Content-Type: "application/json"
-                body:
-                  roleTemplateId: "{{ item.id }}"
-                body_format: json
-                status_code: [201, 204]
-                return_content: yes
-              loop: "{{ role_templates.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
-              register: role_activation
-              when: 
-                - role_templates is defined
-                - role_templates.json.value | selectattr('displayName', 'equalto', default_role_name) | list | length > 0
-        
-            - name: Get Directory Roles After Activation
-              uri:
-                url: "{{ graph_api_endpoint }}/directoryRoles"
-                method: GET
-                headers:
-                  Authorization: "Bearer {{ access_token }}"
-                  Content-Type: "application/json"
-                return_content: yes
-              register: active_roles
-              when: role_activation is defined
-        
-            - name: Assign Directory Role to User
-              uri:
-                url: "{{ graph_api_endpoint }}/directoryRoles/{{ role.id }}/members/$ref"
-                method: POST
-                headers:
-                  Authorization: "Bearer {{ access_token }}"
-                  Content-Type: "application/json"
-                body:
-                  "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
-                body_format: json
-                status_code: [204]
-              loop: "{{ active_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
-              loop_control:
-                loop_var: role
-              when: 
-                - user_creation is defined
-                - user_creation.status in [200, 201]
-                - active_roles is defined
-                - active_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list | length > 0
-              register: role_assign_result
-        
-            - name: Debug Role Assign Result
-              debug:
-                var: role_assign_result
-              when: role_assign_result is defined
-
-  rescue:
-    - name: Role Lookup and Assignment Failure
-      debug:
-        msg: 
-          - "Failed to lookup or assign role: {{ default_role_name }}"
-          - "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list if available_roles is defined else 'N/A' }}"
-          - "Role Templates: {{ role_templates.json.value | map(attribute='displayName') | list if role_templates is defined else 'N/A' }}"
+    - name: Role Lookup and Assignment
+      block:
+        - name: List All Available Directory Roles
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: available_roles
+          when: access_token is defined
+    
+        - name: Debug Available Roles
+          debug:
+            msg: "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list }}"
+          when: available_roles is defined
+    
+        - name: Encode Role Name for URL
+          set_fact:
+            encoded_role_name: "{{ default_role_name | urlencode }}"
+    
+        - name: Get Specific Directory Role Template
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoleTemplates"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: role_templates
+          when: default_role_name is defined and default_role_name != ''
+    
+        - name: Debug Role Templates
+          debug:
+            msg: "Role Templates: {{ role_templates.json.value | map(attribute='displayName') | list }}"
+          when: role_templates is defined
+    
+        - name: Activate Directory Role if Not Active
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            body:
+              roleTemplateId: "{{ item.id }}"
+            body_format: json
+            status_code: [201, 204]
+            return_content: yes
+          loop: "{{ role_templates.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
+          register: role_activation
+          when: 
+            - role_templates is defined
+            - role_templates.json.value | selectattr('displayName', 'equalto', default_role_name) | list | length > 0
+    
+        - name: Get Directory Roles After Activation
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: active_roles
+          when: role_activation is defined
+    
+        - name: Assign Directory Role to User
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles/{{ role.id }}/members/$ref"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            body:
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+            body_format: json
+            status_code: [204]
+          loop: "{{ active_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
+          loop_control:
+            loop_var: role
+          when: 
+            - user_creation is defined
+            - user_creation.status in [200, 201]
+            - active_roles is defined
+            - active_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list | length > 0
+          register: role_assign_result
+    
+        - name: Debug Role Assign Result
+          debug:
+            var: role_assign_result
+          when: role_assign_result is defined
 
       rescue:
-        - name: Role Lookup Failure
+        - name: Role Lookup and Assignment Failure
           debug:
-            msg: "Failed to lookup or assign role: {{ default_role_name }}"
+            msg: 
+              - "Failed to lookup or assign role: {{ default_role_name }}"
+              - "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list if available_roles is defined else 'N/A' }}"
+              - "Role Templates: {{ role_templates.json.value | map(attribute='displayName') | list if role_templates is defined else 'N/A' }}"
 
     - name: Final Debug Information
       debug:
