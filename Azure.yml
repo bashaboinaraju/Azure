@@ -20,7 +20,7 @@
         default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
         default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
 
-    - name: Debug Parsed Variables
+    - name: Debug Initial Payload
       debug:
         msg:
           - "Display Name: {{ default_user_name }}"
@@ -81,51 +81,15 @@
             forceChangePasswordNextSignIn: true
             password: "Default@1234"
         body_format: json
-        status_code: [201]
+        status_code: [201, 200]
       register: user_creation
-      when: user_check.status == 404
+      failed_when: false
 
-    - name: Handle Group Assignment
-      block:
-        - name: Encode Group Name for URL
-          set_fact:
-            encoded_group_name: "{{ default_group_name | urlencode }}"
-          when: default_group_name is defined and default_group_name != ''
-
-        - name: Get Group ID by Name
-          uri:
-            url: "{{ graph_api_endpoint }}/groups?$filter=displayName%20eq%20'{{ encoded_group_name }}'"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            return_content: yes
-          register: group_lookup
-          when: default_group_name is defined and default_group_name != ''
-
-        - name: Add User to Group
-          uri:
-            url: "{{ graph_api_endpoint }}/groups/{{ group_lookup.json.value[0].id }}/members/$ref"
-            method: POST
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            body:
-              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
-            body_format: json
-            status_code: [204]
-          when: 
-            - user_creation is defined
-            - user_creation.status == 201
-            - group_lookup is defined
-            - group_lookup.json is defined
-            - group_lookup.json.value | length > 0
-          register: group_add_result
-
-        - name: Debug Group Assignment
-          debug:
-            msg: "Group Assignment: {{ 'Successful' if group_add_result.status == 204 else 'Failed' }}"
-      when: default_group_name is defined and default_group_name != ''
+    - name: Debug User Creation
+      debug:
+        msg: 
+          - "User Creation Status: {{ user_creation.status }}"
+          - "User ID: {{ user_creation.json.id | default('Not Created') }}"
 
     - name: Handle Role Assignment
       block:
@@ -139,6 +103,12 @@
             return_content: yes
           register: role_templates
           when: default_role_name is defined and default_role_name != ''
+
+        - name: Debug Role Templates
+          debug:
+            msg: 
+              - "Role Templates: {{ role_templates.json.value | map(attribute='displayName') | list if role_templates is defined else 'No Templates' }}"
+              - "Requested Role: {{ default_role_name }}"
 
         - name: Find Matching Role Template
           set_fact:
@@ -154,6 +124,11 @@
             - default_role_name is defined
             - default_role_name != ''
 
+        - name: Debug Matching Role Template
+          debug:
+            msg: 
+              - "Matching Role Template: {{ matching_role_template | default('No Matching Template') }}"
+
         - name: Get Available Directory Roles
           uri:
             url: "{{ graph_api_endpoint }}/directoryRoles"
@@ -166,6 +141,11 @@
           when: 
             - default_role_name is defined
             - default_role_name != ''
+
+        - name: Debug Available Roles
+          debug:
+            msg: 
+              - "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list if available_roles is defined else 'No Roles' }}"
 
         - name: Activate Role if Not Active
           uri:
@@ -183,6 +163,11 @@
             - matching_role_template is not none
           register: role_activation
 
+        - name: Debug Role Activation
+          debug:
+            msg: 
+              - "Role Activation Status: {{ role_activation.status | default('Not Activated') }}"
+
         - name: Assign Role to User
           uri:
             url: "{{ graph_api_endpoint }}/directoryRoles/{{ active_role.id }}/members/$ref"
@@ -198,15 +183,18 @@
           loop_control:
             loop_var: active_role
           when: 
-            - user_creation is defined
-            - user_creation.status in [200, 201]
+            - user_creation.json is defined
+            - user_creation.json.id is defined
             - default_role_name is defined
             - default_role_name != ''
+            - available_roles.json.value is defined
           register: role_assign_result
 
         - name: Debug Role Assignment
           debug:
-            msg: "Role Assignment: {{ 'Successful' if role_assign_result.changed else 'Skipped or Failed' }}"
+            msg: 
+              - "Role Assignment Result: {{ role_assign_result }}"
+              - "Role Assignment Status: {{ 'Successful' if role_assign_result.changed else 'Skipped or Failed' }}"
       when: default_role_name is defined and default_role_name != ''
 
     - name: Final Debug Information
