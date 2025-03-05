@@ -91,7 +91,6 @@
           - "User Creation Status: {{ user_creation.status }}"
           - "User ID: {{ user_creation.json.id | default('Not Created') }}"
 
-    # Added Group Assignment Block
     - name: Group Assignment Block
       block:
         - name: Encode Group Name for URL
@@ -134,12 +133,6 @@
             - group_lookup.json.value | length > 0
           register: group_add_result
 
-        - name: Debug Group Add Result
-          debug:
-            msg: 
-              - "Group Add Result: {{ group_add_result }}"
-              - "Group Assignment Status: {{ 'Successful' if group_add_result.status == 204 else 'Skipped or Failed' }}"
-      when: default_group_name is defined and default_group_name != ''
 
     - name: Handle Role Assignment
       block:
