@@ -147,27 +147,6 @@
             msg: 
               - "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list if available_roles is defined else 'No Roles' }}"
 
-        - name: Activate Role if Not Active
-          uri:
-            url: "{{ graph_api_endpoint }}/directoryRoles"
-            method: POST
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            body:
-              roleTemplateId: "{{ matching_role_template.id }}"
-            body_format: json
-            status_code: [201, 204]
-          when: 
-            - matching_role_template is defined
-            - matching_role_template is not none
-          register: role_activation
-
-        - name: Debug Role Activation
-          debug:
-            msg: 
-              - "Role Activation Status: {{ role_activation.status | default('Not Activated') }}"
-
         - name: Assign Role to User
           uri:
             url: "{{ graph_api_endpoint }}/directoryRoles/{{ active_role.id }}/members/$ref"
