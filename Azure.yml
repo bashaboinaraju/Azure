@@ -63,7 +63,7 @@
       register: user_check
       ignore_errors: yes
 
-    - name: Create User in Azure AD if Not Exists
+    - name: Create User in Azure AD
       uri:
         url: "{{ graph_api_endpoint }}/users"
         method: POST
@@ -85,11 +85,21 @@
       register: user_creation
       failed_when: false
 
-    - name: Debug User Creation
-      debug:
-        msg: 
-          - "User Creation Status: {{ user_creation.status }}"
-          - "User ID: {{ user_creation.json.id | default('Not Created') }}"
+    - name: Detailed User Creation Debug
+      block:
+        - name: Debug User Creation Errors
+          debug:
+            msg: 
+              - "User Creation Status: {{ user_creation.status }}"
+              - "Response Body: {{ user_creation.json | default('No JSON response') }}"
+              - "Error Details: {{ user_creation.json.error.message | default('Unknown error') }}"
+          when: user_creation.status is defined and user_creation.status != 201
+
+        - name: Fail Playbook if User Creation Critically Fails
+          fail:
+            msg: "User creation failed with status {{ user_creation.status }}: {{ user_creation.json.error.message | default('Unknown error') }}"
+          when: user_creation.status is defined and user_creation.status not in [200, 201]
+      when: user_creation.status is defined and user_creation.status not in [200, 201]
 
     - name: Group Assignment Block
       block:
@@ -108,11 +118,6 @@
             return_content: yes
           register: group_lookup
           when: default_group_name is defined and default_group_name != ''
-
-        - name: Debug Group Lookup
-          debug:
-            var: group_lookup
-          when: group_lookup is defined
 
         - name: Add User to Group
           uri:
@@ -133,8 +138,14 @@
             - group_lookup.json.value | length > 0
           register: group_add_result
 
+        - name: Debug Group Add Result
+          debug:
+            msg: 
+              - "Group Add Result: {{ group_add_result }}"
+              - "Group Assignment Status: {{ 'Successful' if group_add_result.status == 204 else 'Skipped or Failed' }}"
+      when: default_group_name is defined and default_group_name != ''
 
-    - name: Handle Role Assignment
+    - name: Role Assignment Block
       block:
         - name: Get Directory Role Templates
           uri:
@@ -146,31 +157,6 @@
             return_content: yes
           register: role_templates
           when: default_role_name is defined and default_role_name != ''
-
-        - name: Debug Role Templates
-          debug:
-            msg: 
-              - "Role Templates: {{ role_templates.json.value | map(attribute='displayName') | list if role_templates is defined else 'No Templates' }}"
-              - "Requested Role: {{ default_role_name }}"
-
-        - name: Find Matching Role Template
-          set_fact:
-            matching_role_template: "{{ 
-              role_templates.json.value | 
-              selectattr('displayName', 'equalto', default_role_name) | 
-              list | 
-              first | 
-              default(None) 
-            }}"
-          when: 
-            - role_templates is defined
-            - default_role_name is defined
-            - default_role_name != ''
-
-        - name: Debug Matching Role Template
-          debug:
-            msg: 
-              - "Matching Role Template: {{ matching_role_template | default('No Matching Template') }}"
 
         - name: Get Available Directory Roles
           uri:
@@ -184,11 +170,6 @@
           when: 
             - default_role_name is defined
             - default_role_name != ''
-
-        - name: Debug Available Roles
-          debug:
-            msg: 
-              - "Available Roles: {{ available_roles.json.value | map(attribute='displayName') | list if available_roles is defined else 'No Roles' }}"
 
         - name: Assign Role to User
           uri:
