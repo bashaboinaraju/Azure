@@ -51,6 +51,7 @@
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
         final_mail_nickname: "{{ default_mail_nickname }}"
+        final_display_name: "{{ default_user_name }}"
 
     # Check if original username exists
     - name: Check if original user exists in Azure AD
@@ -65,8 +66,8 @@
       register: initial_user_check
       ignore_errors: yes
 
-    # Initialize suffix variable
-    - name: Initialize username suffix
+    # Initialize suffix variable - Starting with 2 instead of 1
+    - name: Initialize username suffix to 2
       set_fact:
         username_suffix: 1
       when: initial_user_check.status == 200
@@ -74,11 +75,9 @@
     # Loop to find an available username
     - name: Find available username
       block:
-        - name: Increment username suffix until an available username is found
-          vars:
-            test_username: "{{ default_mail_nickname ~ username_suffix }}"
+        - name: Check if username with suffix exists
           uri:
-            url: "{{ graph_api_endpoint }}/users/{{ test_username }}@{{ domain }}"
+            url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}{{ username_suffix }}@{{ domain }}"
             method: GET
             headers:
               Authorization: "Bearer {{ access_token }}"
@@ -86,23 +85,34 @@
             status_code: [200, 404]
             return_content: yes
           register: username_check
-          until: username_check.status == 404
-          retries: 25
-          delay: 1
           when: initial_user_check.status == 200
-          changed_when: false
+          failed_when: false
 
-        - name: Set final available username
+        - name: Increment suffix if username exists
           set_fact:
-            final_mail_nickname: "{{ default_mail_nickname ~ username_suffix }}"
+            username_suffix: "{{ username_suffix | int + 1 }}"
+          when: username_check.status is defined and username_check.status == 200
+
+        - name: Recursively check usernames until an available one is found
+          include_tasks: tasks/find_available_username.yml
+          when: username_check.status is defined and username_check.status == 200
+      when: initial_user_check.status == 200
+
+    # Set final username and display name with suffix if needed
+    - name: Set final username with suffix if original exists
+      set_fact:
+        final_mail_nickname: "{{ default_mail_nickname }}{{ username_suffix }}"
+        final_display_name: "{{ default_user_name }} {{ username_suffix }}"
       when: initial_user_check.status == 200
 
     # Debug final username
-    - name: Debug final username
+    - name: Debug final username and display name
       debug:
         msg: 
           - "Original username: {{ default_mail_nickname }}"
+          - "Original display name: {{ default_user_name }}"
           - "Final username to be used: {{ final_mail_nickname }}"
+          - "Final display name to be used: {{ final_display_name }}"
 
     # Create User in Azure AD with Updated Display Name
     - name: Create User in Azure AD
@@ -114,9 +124,9 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ default_user_name }}"
+          displayName: "{{ final_display_name }}"
           givenName: "{{ first_name | default(default_user_name) }}"
-          surname: "{{ last_name | default('') }}"
+          surname: "{{ last_name | default('') }}{{ ' ' + username_suffix|string if username_suffix is defined else '' }}"
           mailNickname: "{{ final_mail_nickname }}"
           userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
           passwordProfile:
@@ -126,7 +136,6 @@
         status_code: [201, 200]
       register: user_creation
       failed_when: false
-
 
     - name: Detailed User Creation Debug
       block:
@@ -250,5 +259,7 @@
           - "Last Name: {{ last_name | default('Not Set') }}"
           - "Original Mail Nickname: {{ default_mail_nickname }}"
           - "Final Mail Nickname: {{ final_mail_nickname }}"
+          - "Original Display Name: {{ default_user_name }}"
+          - "Final Display Name: {{ final_display_name }}"
           - "Group: {{ default_group_name | default('No Group Specified') }}"
           - "Role: {{ default_role_name | default('No Role Specified') }}"
