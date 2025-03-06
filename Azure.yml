@@ -110,3 +110,155 @@
           - "Final username to be used: {{ final_mail_nickname }}"
           - "Final display name to be used: {{ final_display_name }}"
           - "Username counter (if used): {{ username_counter | default('N/A') }}"
+
+
+    # Create User in Azure AD with Updated Display Name
+    - name: Create User in Azure AD
+      uri:
+        url: "{{ graph_api_endpoint }}/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        body:
+          accountEnabled: true
+          displayName: "{{ final_display_name }}"
+          givenName: "{{ first_name | default(default_user_name) }}"
+          surname: "{{ last_name | default('') }}"
+          mailNickname: "{{ final_mail_nickname }}"
+          userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
+          passwordProfile:
+            forceChangePasswordNextSignIn: true
+            password: "Default@1234"
+        body_format: json
+        status_code: [201, 200]
+      register: user_creation
+      failed_when: false
+
+    - name: Detailed User Creation Debug
+      block:
+        - name: Debug User Creation Errors
+          debug:
+            msg: 
+              - "User Creation Status: {{ user_creation.status }}"
+              - "Response Body: {{ user_creation.json | default('No JSON response') }}"
+              - "Error Details: {{ user_creation.json.error.message | default('Unknown error') }}"
+          when: user_creation.status is defined and user_creation.status != 201
+
+        - name: Fail Playbook if User Creation Critically Fails
+          fail:
+            msg: "User creation failed with status {{ user_creation.status }}: {{ user_creation.json.error.message | default('Unknown error') }}"
+          when: user_creation.status is defined and user_creation.status not in [200, 201]
+      when: user_creation.status is defined and user_creation.status not in [200, 201]
+
+    - name: Group Assignment Block
+      block:
+        - name: Encode Group Name for URL
+          set_fact:
+            encoded_group_name: "{{ default_group_name | urlencode }}"
+          when: default_group_name is defined and default_group_name != ''
+
+        - name: Get Group ID by Name
+          uri:
+            url: "{{ graph_api_endpoint }}/groups?$filter=displayName%20eq%20'{{ encoded_group_name }}'"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: group_lookup
+          when: default_group_name is defined and default_group_name != ''
+
+        - name: Add User to Group
+          uri:
+            url: "{{ graph_api_endpoint }}/groups/{{ group_lookup.json.value[0].id }}/members/$ref"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            body:
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+            body_format: json
+            status_code: [204]
+          when: 
+            - user_creation.json is defined
+            - user_creation.json.id is defined
+            - group_lookup is defined
+            - group_lookup.json is defined
+            - group_lookup.json.value | length > 0
+          register: group_add_result
+
+        - name: Debug Group Add Result
+          debug:
+            msg: 
+              - "Group Add Result: {{ group_add_result }}"
+              - "Group Assignment Status: {{ 'Successful' if group_add_result.status == 204 else 'Skipped or Failed' }}"
+      when: default_group_name is defined and default_group_name != ''
+
+    - name: Role Assignment Block
+      block:
+        - name: Get Directory Role Templates
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoleTemplates"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: role_templates
+          when: default_role_name is defined and default_role_name != ''
+
+        - name: Get Available Directory Roles
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            return_content: yes
+          register: available_roles
+          when: 
+            - default_role_name is defined
+            - default_role_name != ''
+
+        - name: Assign Role to User
+          uri:
+            url: "{{ graph_api_endpoint }}/directoryRoles/{{ active_role.id }}/members/$ref"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            body:
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+            body_format: json
+            status_code: [204]
+          loop: "{{ available_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
+          loop_control:
+            loop_var: active_role
+          when: 
+            - user_creation.json is defined
+            - user_creation.json.id is defined
+            - default_role_name is defined
+            - default_role_name != ''
+            - available_roles.json.value is defined
+          register: role_assign_result
+
+        - name: Debug Role Assignment
+          debug:
+            msg: 
+              - "Role Assignment Result: {{ role_assign_result }}"
+              - "Role Assignment Status: {{ 'Successful' if role_assign_result.changed else 'Skipped or Failed' }}"
+      when: default_role_name is defined and default_role_name != ''
+
+    - name: Final Debug Information
+      debug:
+        msg:
+          - "First Name: {{ first_name | default('Not Set') }}"
+          - "Last Name: {{ last_name | default('Not Set') }}"
+          - "Original Mail Nickname: {{ default_mail_nickname }}"
+          - "Base Mail Nickname (without numbers): {{ base_mail_nickname }}"
+          - "Final Mail Nickname: {{ final_mail_nickname }}"
+          - "Original Display Name: {{ default_user_name }}"
+          - "Final Display Name: {{ final_display_name }}"
+          - "Group: {{ default_group_name | default('No Group Specified') }}"
+          - "Role: {{ default_role_name | default('No Role Specified') }}"
