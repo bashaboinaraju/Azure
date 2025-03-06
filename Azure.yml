@@ -73,7 +73,7 @@
     # Create a simple counter for sequential suffixes
     - name: Setup username counter and related variables
       set_fact:
-        username_counter: 2
+        username_counter: 1
         username_found: false
       when: initial_user_check.status == 200
 
