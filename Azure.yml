@@ -70,54 +70,39 @@
       register: initial_user_check
       ignore_errors: yes
 
-    # Find an available username using sequential suffixes - all in the main playbook instead of separate file
+    # Find an available username using sequential suffixes
     - name: Sequential username search if original exists
       block:
         - name: Initialize counter
           set_fact:
             username_counter: 1
-            
-        - name: Loop until we find an available username
-          block:
-            - name: Check if username with counter exists
-              uri:
-                url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
-                method: GET
-                headers:
-                  Authorization: "Bearer {{ access_token }}"
-                  Content-Type: "application/json"
-                status_code: [200, 404]
-                return_content: yes
-              register: username_check
-              ignore_errors: yes
-              
-            - name: If username is taken, increment counter and try again
-              block:
-                - name: Increment counter
-                  set_fact:
-                    username_counter: "{{ username_counter | int + 1 }}"
-                
-                - name: Check next username in sequence
-                  uri:
-                    url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
-                    method: GET
-                    headers:
-                      Authorization: "Bearer {{ access_token }}"
-                      Content-Type: "application/json"
-                    status_code: [200, 404]
-                    return_content: yes
-                  register: username_check
-                  ignore_errors: yes
-              when: username_check.status == 200
-              until: username_check.status == 404
-              retries: 20
-              delay: 1
-          
-        - name: Set final username with counter
-          set_fact:
-            final_mail_nickname: "{{ base_mail_nickname }}{{ username_counter }}"
-            final_display_name: "{{ default_user_name }} {{ username_counter }}"
-      when: initial_user_check.status == 200
+        
+    # Use a simple task with until instead of a block with until
+    - name: Check username availability with counter
+      uri:
+        url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        status_code: [200, 404]
+        return_content: yes
+      register: username_check
+      ignore_errors: yes
+      until: username_check.status == 404
+      retries: 20
+      delay: 1
+      
+    - name: Increment counter after each check
+      set_fact:
+        username_counter: "{{ username_counter | int + 1 }}"
+      when: username_check.status == 200
+      
+    - name: Set final username with counter
+      set_fact:
+        final_mail_nickname: "{{ base_mail_nickname }}{{ username_counter }}"
+        final_display_name: "{{ default_user_name }} {{ username_counter }}"
+  when: initial_user_check.status == 200
 
     # Debug final username
     - name: Debug final username and display name
