@@ -51,7 +51,7 @@
 
     - name: Check if the original username exists
       uri:
-        url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}@{{ domain }}"
+        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
         method: GET
         headers:
           Authorization: "Bearer {{ access_token }}"
