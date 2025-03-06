@@ -54,6 +54,19 @@
         username_counter: 1
         username_available: false
 
+         - name: Check if the original username exists
+      uri:
+        url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}@{{ domain }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ access_token }}"
+          Content-Type: "application/json"
+        status_code: [200, 404]
+        return_content: yes
+      register: initial_user_check
+      ignore_errors: yes
+ 
+
     - name: Sequential username search if original exists
       when: initial_user_check.status == 200
       block:
