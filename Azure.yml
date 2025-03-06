@@ -87,7 +87,7 @@
             return_content: yes
           register: username_check
           until: username_check.status == 404
-          retries: 5
+          retries: 25
           delay: 1
           when: initial_user_check.status == 200
           changed_when: false
@@ -114,7 +114,7 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ default_user_name }} ({{ final_mail_nickname }})"
+          displayName: "{{ default_user_name }}"
           givenName: "{{ first_name | default(default_user_name) }}"
           surname: "{{ last_name | default('') }}"
           mailNickname: "{{ final_mail_nickname }}"
