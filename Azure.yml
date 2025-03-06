@@ -16,7 +16,7 @@
     - name: Set Payload Variables
       set_fact:
         default_user_name: "{{ awx_webhook_payload.displayName | default('') }}"
-        default_mail_nickname: "{{ awx_webhook_payload.displayName.split(' ')[0] | default('') }}"
+        default_mail_nickname: "{{ awx_webhook_payload.displayName.split(' ')[1:] | default('') }}"
         default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
         default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
 
@@ -50,18 +50,79 @@
     - name: Set Azure token
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
+        current_mail_nickname: "{{ default_mail_nickname }}"
+        username_found: false
+        attempt_count: 0
+        max_attempts: 10
 
-    - name: Check if user exists in Azure AD
-      uri:
-        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        status_code: [200, 404]
-        return_content: yes
-      register: user_check
-      ignore_errors: yes
+    # Initialize variables for username generation
+    - name: Initialize username variables
+      set_fact:
+        final_mail_nickname: ""
+        current_increment: 0
+
+    # Loop to find available username
+    - name: Find available username
+      block:
+        - name: Check if user exists in Azure AD
+          uri:
+            url: "{{ graph_api_endpoint }}/users/{{ current_mail_nickname }}@{{ domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ access_token }}"
+              Content-Type: "application/json"
+            status_code: [200, 404]
+            return_content: yes
+          register: user_check
+          ignore_errors: yes
+
+        - name: Set username found flag
+          set_fact:
+            username_found: "{{ user_check.status == 200 }}"
+            attempt_count: "{{ attempt_count | int + 1 }}"
+
+        - name: Debug username check
+          debug:
+            msg: "Checking username: {{ current_mail_nickname }} - Exists: {{ username_found }}"
+
+        # If username exists, generate a new one by incrementing the number
+        - name: Generate new username if current one exists
+          block:
+            - name: Check if current username already has a numeric suffix
+              set_fact:
+                base_nickname: "{{ current_mail_nickname | regex_replace('^(.+?)\\d*$', '\\1') }}"
+                current_suffix: "{{ current_mail_nickname | regex_findall('\\d+$') | first | default('0') }}"
+              when: username_found
+
+            - name: Increment suffix
+              set_fact:
+                next_suffix: "{{ (current_suffix | int) + 1 }}"
+                current_mail_nickname: "{{ base_nickname }}{{ (current_suffix | int) + 1 }}"
+              when: username_found
+
+            - name: Debug new username
+              debug:
+                msg: 
+                  - "Base nickname: {{ base_nickname }}"
+                  - "Current suffix: {{ current_suffix }}"
+                  - "Next suffix: {{ next_suffix }}"
+                  - "New mail nickname: {{ current_mail_nickname }}"
+              when: username_found
+          when: username_found
+
+        - name: Save final mail nickname when available username found
+          set_fact:
+            final_mail_nickname: "{{ current_mail_nickname }}"
+          when: not username_found
+
+      # Repeat the block until we find an available username or reach max attempts
+      until: not username_found or attempt_count | int >= max_attempts | int
+      retries: "{{ max_attempts }}"
+      delay: 1
+
+    - name: Debug final username
+      debug:
+        msg: "Final username to be used: {{ final_mail_nickname }}"
 
     - name: Create User in Azure AD
       uri:
@@ -75,8 +136,8 @@
           displayName: "{{ default_user_name }}"
           givenName: "{{ first_name | default(default_user_name) }}"
           surname: "{{ last_name | default('') }}"
-          mailNickname: "{{ default_mail_nickname }}"
-          userPrincipalName: "{{ default_mail_nickname }}@{{ domain }}"
+          mailNickname: "{{ final_mail_nickname }}"
+          userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
           passwordProfile:
             forceChangePasswordNextSignIn: true
             password: "Default@1234"
@@ -205,5 +266,7 @@
         msg:
           - "First Name: {{ first_name | default('Not Set') }}"
           - "Last Name: {{ last_name | default('Not Set') }}"
+          - "Original Mail Nickname: {{ default_mail_nickname }}"
+          - "Final Mail Nickname: {{ final_mail_nickname }}"
           - "Group: {{ default_group_name | default('No Group Specified') }}"
           - "Role: {{ default_role_name | default('No Role Specified') }}"
