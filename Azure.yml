@@ -34,6 +34,10 @@
         last_name: "{{ default_user_name.split(' ')[1:] | join(' ') }}"
       when: default_user_name is defined and ' ' in default_user_name
 
+    - name: Extract base mail nickname (without any numbers at the end)
+      set_fact:
+        base_mail_nickname: "{{ default_mail_nickname | regex_replace('\\d+$', '') }}"
+
     - name: Get Azure access token
       uri:
         url: "https://login.microsoftonline.com/{{ tenant_id }}/oauth2/v2.0/token"
@@ -50,13 +54,13 @@
     - name: Set Azure token
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
-        final_mail_nickname: "{{ default_mail_nickname }}"
+        final_mail_nickname: "{{ base_mail_nickname }}"
         final_display_name: "{{ default_user_name }}"
 
     # Check if original username exists
     - name: Check if original user exists in Azure AD
       uri:
-        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
+        url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}@{{ domain }}"
         method: GET
         headers:
           Authorization: "Bearer {{ access_token }}"
@@ -66,18 +70,19 @@
       register: initial_user_check
       ignore_errors: yes
 
-    # Initialize suffix variable - Starting with 2 instead of 1
-    - name: Initialize username suffix to 2
+    # Create a simple counter for sequential suffixes
+    - name: Setup username counter and related variables
       set_fact:
-        username_suffix: 1
+        username_counter: 2
+        username_found: false
       when: initial_user_check.status == 200
 
-    # Loop to find an available username
-    - name: Find available username
+    # Find an available username using sequential suffixes
+    - name: Sequential username search loop
       block:
-        - name: Check if username with suffix exists
+        - name: Loop until we find an available username
           uri:
-            url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}{{ username_suffix }}@{{ domain }}"
+            url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
             method: GET
             headers:
               Authorization: "Bearer {{ access_token }}"
@@ -85,30 +90,30 @@
             status_code: [200, 404]
             return_content: yes
           register: username_check
-          when: initial_user_check.status == 200
-          failed_when: false
+          ignore_errors: yes
 
-        - name: Increment suffix if username exists
+        - name: Check if username is available
           set_fact:
-            username_suffix: "{{ username_suffix | int + 1 }}"
-          when: username_check.status is defined and username_check.status == 200
+            username_found: true
+            final_mail_nickname: "{{ base_mail_nickname }}{{ username_counter }}"
+            final_display_name: "{{ default_user_name }} {{ username_counter }}"
+          when: username_check.status == 404
 
-        - name: Recursively check usernames until an available one is found
-          include_tasks: tasks/find_available_username.yml
-          when: username_check.status is defined and username_check.status == 200
-      when: initial_user_check.status == 200
+        - name: Increment counter if username is taken
+          set_fact:
+            username_counter: "{{ username_counter | int + 1 }}"
+          when: username_check.status == 200
 
-    # Set final username and display name with suffix if needed
-    - name: Set final username with suffix if original exists
-      set_fact:
-        final_mail_nickname: "{{ default_mail_nickname }}{{ username_suffix }}"
-        final_display_name: "{{ default_user_name }} {{ username_suffix }}"
+        - name: Continue the loop if username is taken
+          include_tasks: "{{ playbook_dir }}/sequential_username_check.yml"
+          when: not username_found and username_check.status == 200
       when: initial_user_check.status == 200
 
     # Debug final username
     - name: Debug final username and display name
       debug:
         msg: 
+          - "Base username (without numbers): {{ base_mail_nickname }}"
           - "Original username: {{ default_mail_nickname }}"
           - "Original display name: {{ default_user_name }}"
           - "Final username to be used: {{ final_mail_nickname }}"
@@ -126,7 +131,7 @@
           accountEnabled: true
           displayName: "{{ final_display_name }}"
           givenName: "{{ first_name | default(default_user_name) }}"
-          surname: "{{ last_name | default('') }}{{ ' ' + username_suffix|string if username_suffix is defined else '' }}"
+          surname: "{{ last_name | default('') }}"
           mailNickname: "{{ final_mail_nickname }}"
           userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
           passwordProfile:
@@ -258,6 +263,7 @@
           - "First Name: {{ first_name | default('Not Set') }}"
           - "Last Name: {{ last_name | default('Not Set') }}"
           - "Original Mail Nickname: {{ default_mail_nickname }}"
+          - "Base Mail Nickname (without numbers): {{ base_mail_nickname }}"
           - "Final Mail Nickname: {{ final_mail_nickname }}"
           - "Original Display Name: {{ default_user_name }}"
           - "Final Display Name: {{ final_display_name }}"
