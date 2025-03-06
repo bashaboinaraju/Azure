@@ -53,64 +53,79 @@
         found_available_username: false
         final_mail_nickname: ""
 
-    # Improved username search with shell script approach
-    - name: Find available username
+    - name: Find first available username and create user
       shell: |
         #!/bin/bash
-        
-        # Parameters
+        # Script to find first available username and create Azure AD user
+        # Variables
         ACCESS_TOKEN="{{ access_token }}"
         BASE_NAME="{{ default_mail_nickname }}"
-        DOMAIN="{{ domain }}"
+        DOMAIN="{{ domain_name }}"
+        DISPLAY_NAME="{{ default_user_name }}"
+        START_NUM={{ start_number }}
+        MAX_NUM={{ max_number }}
         GRAPH_API="{{ graph_api_endpoint }}"
-        MAX_ATTEMPTS="{{ max_username_attempts }}"
-        
-        # First check the base username without any number
-        echo "Checking base username: ${BASE_NAME}@${DOMAIN}"
-        BASE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-          -H "Authorization: Bearer $ACCESS_TOKEN" \
-          -H "Content-Type: application/json" \
-          "${GRAPH_API}/users/${BASE_NAME}@${DOMAIN}")
-        
-        if [ "$BASE_STATUS" == "404" ]; then
-          echo "Base username available: ${BASE_NAME}"
-          echo "${BASE_NAME}"
-          exit 0
-        fi
-        
-        # Search for available username with incremental suffix
-        for i in $(seq 1 $MAX_ATTEMPTS); do
-          USERNAME="${BASE_NAME}${i}"
-          echo "Checking username: ${USERNAME}@${DOMAIN}"
-          
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+        # Function to check if username exists
+        check_username() {
+          local num=$1
+          local username="${BASE_NAME}${num}@${DOMAIN}"
+          # Make API call to check if user exists
+          status_code=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            "${GRAPH_API}/users/${USERNAME}@${DOMAIN}")
-          
-          if [ "$STATUS" == "404" ]; then
-            echo "Found available username: ${USERNAME}"
-            echo "${USERNAME}"
+            "${GRAPH_API}/users/${username}")
+          echo "Checking ${username} - Status: ${status_code}"
+          # Return true (0) if username is available (404), false (1) otherwise
+          if [ "$status_code" == "404" ]; then
+            return 0
+          else
+            return 1
+          fi
+        }
+        # Function to create user
+        create_user() {
+          local nickname=$1
+          local username="${nickname}@${DOMAIN}"
+          # Create JSON payload
+          json_payload=$(cat <<EOF
+        {
+          "accountEnabled": true,
+          "displayName": "${DISPLAY_NAME}",
+          "mailNickname": "${nickname}",
+          "userPrincipalName": "${username}",
+          "passwordProfile": {
+            "forceChangePasswordNextSignIn": true,
+            "password": "Default@1234"
+          }
+        }
+        EOF
+        )
+          # Make API call to create user
+          response=$(curl -s \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload" \
+            -X POST \
+            "${GRAPH_API}/users")
+          echo "User creation response: $response"
+          echo "AVAILABLE_USERNAME=${username}" > /tmp/username_result.txt
+        }
+        # Main loop to find available username
+        for ((i=${START_NUM}; i<=${MAX_NUM}; i++)); do
+          if check_username $i; then
+            echo "Found available username: ${BASE_NAME}${i}@${DOMAIN}"
+            create_user "${BASE_NAME}${i}"
             exit 0
           fi
         done
-        
-        # If we reach here, no username was found
-        echo "ERROR: No available username found after ${MAX_ATTEMPTS} attempts"
+        echo "No available username found after checking ${MAX_NUM} options"
         exit 1
       args:
         executable: /bin/bash
       register: username_search_result
-      failed_when: username_search_result.rc != 0
-    
-    - name: Set final mail nickname from search result
-      set_fact:
-        final_mail_nickname: "{{ username_search_result.stdout_lines[-1] }}"
-      when: username_search_result.rc == 0
-    
-    - name: Debug final username
+    - name: Debug script result
       debug:
-        msg: "Final username will be: {{ final_mail_nickname }}@{{ domain }}"
+        msg: "{{ username_search_result.stdout_lines }}"
 
     - name: Create User in Azure AD
       uri:
