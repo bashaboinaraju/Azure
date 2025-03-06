@@ -70,43 +70,53 @@
       register: initial_user_check
       ignore_errors: yes
 
-    # Create a simple counter for sequential suffixes
-    - name: Setup username counter and related variables
-      set_fact:
-        username_counter: 1
-        username_found: false
-      when: initial_user_check.status == 200
-
-    # Find an available username using sequential suffixes
-    - name: Sequential username search loop
+    # Find an available username using sequential suffixes - all in the main playbook instead of separate file
+    - name: Sequential username search if original exists
       block:
-        - name: Loop until we find an available username
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: username_check
-          ignore_errors: yes
-
-        - name: Check if username is available
+        - name: Initialize counter
           set_fact:
-            username_found: true
+            username_counter: 1
+            
+        - name: Loop until we find an available username
+          block:
+            - name: Check if username with counter exists
+              uri:
+                url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ access_token }}"
+                  Content-Type: "application/json"
+                status_code: [200, 404]
+                return_content: yes
+              register: username_check
+              ignore_errors: yes
+              
+            - name: If username is taken, increment counter and try again
+              block:
+                - name: Increment counter
+                  set_fact:
+                    username_counter: "{{ username_counter | int + 1 }}"
+                
+                - name: Check next username in sequence
+                  uri:
+                    url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
+                    method: GET
+                    headers:
+                      Authorization: "Bearer {{ access_token }}"
+                      Content-Type: "application/json"
+                    status_code: [200, 404]
+                    return_content: yes
+                  register: username_check
+                  ignore_errors: yes
+              when: username_check.status == 200
+              until: username_check.status == 404
+              retries: 20
+              delay: 1
+          
+        - name: Set final username with counter
+          set_fact:
             final_mail_nickname: "{{ base_mail_nickname }}{{ username_counter }}"
             final_display_name: "{{ default_user_name }} {{ username_counter }}"
-          when: username_check.status == 404
-
-        - name: Increment counter if username is taken
-          set_fact:
-            username_counter: "{{ username_counter | int + 1 }}"
-          when: username_check.status == 200
-
-        - name: Continue the loop if username is taken
-          include_tasks: "{{ playbook_dir }}/sequential_username_check.yml"
-          when: not username_found and username_check.status == 200
       when: initial_user_check.status == 200
 
     # Debug final username
@@ -118,6 +128,7 @@
           - "Original display name: {{ default_user_name }}"
           - "Final username to be used: {{ final_mail_nickname }}"
           - "Final display name to be used: {{ final_display_name }}"
+          - "Username counter (if used): {{ username_counter | default('N/A') }}"
 
     # Create User in Azure AD with Updated Display Name
     - name: Create User in Azure AD
