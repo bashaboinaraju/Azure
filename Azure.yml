@@ -20,14 +20,6 @@
         default_group_name: "{{ awx_webhook_payload.groupName | default('') }}"
         default_role_name: "{{ awx_webhook_payload.roleName | default('') }}"
 
-    - name: Debug Initial Payload
-      debug:
-        msg:
-          - "Display Name: {{ default_user_name }}"
-          - "Mail Nickname: {{ default_mail_nickname }}"
-          - "Group Name: {{ default_group_name }}"
-          - "Role Name: {{ default_role_name }}"
-
     - name: Parse Display Name into First and Last Name
       set_fact:
         first_name: "{{ default_user_name.split(' ')[0] }}"
@@ -57,62 +49,50 @@
         final_mail_nickname: "{{ base_mail_nickname }}"
         final_display_name: "{{ default_user_name }}"
 
-    - name: Check if original user exists in Azure AD
-      uri:
-        url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}@{{ domain }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        status_code: [200, 404]
-        return_content: yes
-      register: initial_user_check
-      ignore_errors: yes
+    - name: Initialize username counter
+      set_fact:
+        username_counter: 1
+        username_available: false
 
-    - name: Sequential username search if original exists
-      when: initial_user_check.status == 200
+    - name: Check for available username
       block:
-        - name: Initialize counter
-          set_fact:
-            username_counter: 1
-
-        - name: Check username availability with counter
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: username_check
-          ignore_errors: yes
-          until: username_check.status == 404
+        - name: Loop until available username is found
+          until: username_available
           retries: 20
           delay: 1
+          block:
+            - name: Check if username exists in Azure AD
+              uri:
+                url: "{{ graph_api_endpoint }}/users/{{ base_mail_nickname }}{{ username_counter if username_counter > 1 else '' }}@{{ domain }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ access_token }}"
+                  Content-Type: "application/json"
+                status_code: [200, 404]
+                return_content: yes
+              register: username_check
+              ignore_errors: yes
 
-        - name: Increment counter after each check
-          set_fact:
-            username_counter: "{{ username_counter | int + 1 }}"
-          when: username_check.status == 200
+            - name: Evaluate username availability
+              set_fact:
+                username_available: "{{ username_check.status == 404 }}"
 
-        - name: Set final username with counter
-          set_fact:
-            final_mail_nickname: "{{ base_mail_nickname }}{{ username_counter }}"
-            final_display_name: "{{ default_user_name }} {{ username_counter }}"
+            - name: Increment counter if username exists
+              set_fact:
+                username_counter: "{{ username_counter | int + 1 }}"
+              when: not username_available
+
+    - name: Set final username with available counter
+      set_fact:
+        final_mail_nickname: "{{ base_mail_nickname }}{{ username_counter if username_counter > 1 else '' }}"
+        final_display_name: "{{ default_user_name }} {{ username_counter if username_counter > 1 else '' }}"
 
     - name: Debug final username and display name
       debug:
         msg:
-          - "Base username (without numbers): {{ base_mail_nickname }}"
-          - "Original username: {{ default_mail_nickname }}"
-          - "Original display name: {{ default_user_name }}"
           - "Final username to be used: {{ final_mail_nickname }}"
           - "Final display name to be used: {{ final_display_name }}"
-          - "Username counter (if used): {{ username_counter | default('N/A') }}"
 
-
-    # Create User in Azure AD with Updated Display Name
     - name: Create User in Azure AD
       uri:
         url: "{{ graph_api_endpoint }}/users"
@@ -133,23 +113,15 @@
         body_format: json
         status_code: [201, 200]
       register: user_creation
-      failed_when: false
+      failed_when: user_creation.status not in [200, 201]
 
-    - name: Detailed User Creation Debug
-      block:
-        - name: Debug User Creation Errors
-          debug:
-            msg: 
-              - "User Creation Status: {{ user_creation.status }}"
-              - "Response Body: {{ user_creation.json | default('No JSON response') }}"
-              - "Error Details: {{ user_creation.json.error.message | default('Unknown error') }}"
-          when: user_creation.status is defined and user_creation.status != 201
+    - name: Debug User Creation Status
+      debug:
+        msg:
+          - "User Creation Status: {{ user_creation.status }}"
+          - "Response Body: {{ user_creation.json | default('No JSON response') }}"
+          - "Error Details: {{ user_creation.json.error.message | default('Unknown error') }}"
 
-        - name: Fail Playbook if User Creation Critically Fails
-          fail:
-            msg: "User creation failed with status {{ user_creation.status }}: {{ user_creation.json.error.message | default('Unknown error') }}"
-          when: user_creation.status is defined and user_creation.status not in [200, 201]
-      when: user_creation.status is defined and user_creation.status not in [200, 201]
 
     - name: Group Assignment Block
       block:
