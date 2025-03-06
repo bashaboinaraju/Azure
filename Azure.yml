@@ -55,7 +55,7 @@
     # Check if original username exists
     - name: Check if original user exists in Azure AD
       uri:
-        url: "{{ graph_api_endpoint }}/users/{{ final_mail_nickname }}@{{ domain }}"
+        url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}@{{ domain }}"
         method: GET
         headers:
           Authorization: "Bearer {{ access_token }}"
@@ -65,136 +65,46 @@
       register: initial_user_check
       ignore_errors: yes
 
-    # If original username exists, try with suffix 1
-    - name: Try username with suffix 1
-      block:
-        - name: Set username with suffix 1
-          set_fact:
-            final_mail_nickname: "{{ default_mail_nickname }}1"
-            
-        - name: Check if username with suffix 1 exists
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ final_mail_nickname }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: user_check_1
-          ignore_errors: yes
+    # Initialize suffix variable
+    - name: Initialize username suffix
+      set_fact:
+        username_suffix: 1
       when: initial_user_check.status == 200
 
-    # If username with suffix 1 exists, try with suffix 2
-    - name: Try username with suffix 2
+    # Loop to find an available username
+    - name: Find available username
       block:
-        - name: Set username with suffix 2
-          set_fact:
-            final_mail_nickname: "{{ default_mail_nickname }}2"
-            
-        - name: Check if username with suffix 2 exists
+        - name: Increment username suffix until an available username is found
+          vars:
+            test_username: "{{ default_mail_nickname ~ username_suffix }}"
           uri:
-            url: "{{ graph_api_endpoint }}/users/{{ final_mail_nickname }}@{{ domain }}"
+            url: "{{ graph_api_endpoint }}/users/{{ test_username }}@{{ domain }}"
             method: GET
             headers:
               Authorization: "Bearer {{ access_token }}"
               Content-Type: "application/json"
             status_code: [200, 404]
             return_content: yes
-          register: user_check_2
-          ignore_errors: yes
-      when: 
-        - initial_user_check.status == 200
-        - user_check_1 is defined
-        - user_check_1.status == 200
+          register: username_check
+          until: username_check.status == 404
+          retries: 5
+          delay: 1
+          when: initial_user_check.status == 200
+          changed_when: false
 
-    # If username with suffix 2 exists, try with suffix 3
-    - name: Try username with suffix 3
-      block:
-        - name: Set username with suffix 3
+        - name: Set final available username
           set_fact:
-            final_mail_nickname: "{{ default_mail_nickname }}3"
-            
-        - name: Check if username with suffix 3 exists
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ final_mail_nickname }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: user_check_3
-          ignore_errors: yes
-      when: 
-        - initial_user_check.status == 200
-        - user_check_1 is defined
-        - user_check_1.status == 200
-        - user_check_2 is defined
-        - user_check_2.status == 200
+            final_mail_nickname: "{{ default_mail_nickname ~ username_suffix }}"
+      when: initial_user_check.status == 200
 
-    # If username with suffix 3 exists, try with suffix 4
-    - name: Try username with suffix 4
-      block:
-        - name: Set username with suffix 4
-          set_fact:
-            final_mail_nickname: "{{ default_mail_nickname }}4"
-            
-        - name: Check if username with suffix 4 exists
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ final_mail_nickname }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: user_check_4
-          ignore_errors: yes
-      when: 
-        - initial_user_check.status == 200
-        - user_check_1 is defined
-        - user_check_1.status == 200
-        - user_check_2 is defined
-        - user_check_2.status == 200
-        - user_check_3 is defined
-        - user_check_3.status == 200
-
-    # If username with suffix 4 exists, try with suffix 5
-    - name: Try username with suffix 5
-      block:
-        - name: Set username with suffix 5
-          set_fact:
-            final_mail_nickname: "{{ default_mail_nickname }}5"
-            
-        - name: Check if username with suffix 5 exists
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ final_mail_nickname }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: user_check_5
-          ignore_errors: yes
-      when: 
-        - initial_user_check.status == 200
-        - user_check_1 is defined
-        - user_check_1.status == 200
-        - user_check_2 is defined
-        - user_check_2.status == 200
-        - user_check_3 is defined
-        - user_check_3.status == 200
-        - user_check_4 is defined
-        - user_check_4.status == 200
-
+    # Debug final username
     - name: Debug final username
       debug:
         msg: 
           - "Original username: {{ default_mail_nickname }}"
           - "Final username to be used: {{ final_mail_nickname }}"
 
+    # Create User in Azure AD with Updated Display Name
     - name: Create User in Azure AD
       uri:
         url: "{{ graph_api_endpoint }}/users"
@@ -204,7 +114,7 @@
           Content-Type: "application/json"
         body:
           accountEnabled: true
-          displayName: "{{ default_user_name }}"
+          displayName: "{{ default_user_name }} ({{ final_mail_nickname }})"
           givenName: "{{ first_name | default(default_user_name) }}"
           surname: "{{ last_name | default('') }}"
           mailNickname: "{{ final_mail_nickname }}"
@@ -216,6 +126,7 @@
         status_code: [201, 200]
       register: user_creation
       failed_when: false
+
 
     - name: Detailed User Creation Debug
       block:
