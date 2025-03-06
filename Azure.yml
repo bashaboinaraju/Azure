@@ -54,14 +54,13 @@
         username_found: false
         attempt_count: 0
         max_attempts: 10
-
-    # Initialize variables for username generation
+        
     - name: Initialize username variables
       set_fact:
         final_mail_nickname: ""
         current_increment: 0
 
-    # Loop to find available username
+   
     - name: Find available username
       block:
         - name: Check if user exists in Azure AD
@@ -85,7 +84,7 @@
           debug:
             msg: "Checking username: {{ current_mail_nickname }} - Exists: {{ username_found }}"
 
-        # If username exists, generate a new one by incrementing the number
+        
         - name: Generate new username if current one exists
           block:
             - name: Check if current username already has a numeric suffix
@@ -115,7 +114,7 @@
             final_mail_nickname: "{{ current_mail_nickname }}"
           when: not username_found
 
-      # Repeat the block until we find an available username or reach max attempts
+     
       until: not username_found or attempt_count | int >= max_attempts | int
       retries: "{{ max_attempts }}"
       delay: 1
