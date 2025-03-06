@@ -11,6 +11,7 @@
     client_secret: "PQZ8Q~XSmMsU4dbgk2KyWMHK1h8X7ciD~H.1_csi"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     domain: "amitomar63gmail.onmicrosoft.com"
+    max_username_attempts: 100  # Maximum number of username attempts to check
   tasks:
     - name: Set Payload Variables
       set_fact:
@@ -49,56 +50,67 @@
     - name: Set Azure token
       set_fact:
         access_token: "{{ azure_auth_response.json.access_token }}"
-        current_counter: 0
-        available_upn_found: false
+        found_available_username: false
         final_mail_nickname: ""
 
-    # Loop through potential usernames until an available one is found
-    - name: Check username availability with incrementing counter
-      block:
-        - name: Check if username exists in Azure AD
-          uri:
-            url: "{{ graph_api_endpoint }}/users/{{ default_mail_nickname }}{{ '' if item == 0 else item }}@{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ access_token }}"
-              Content-Type: "application/json"
-            status_code: [200, 404]
-            return_content: yes
-          register: username_check
-          ignore_errors: yes
-          loop: "{{ range(0, 25)|list }}"
-          loop_control:
-            label: "Checking {{ default_mail_nickname }}{{ '' if item == 0 else item }}"
-          when: not available_upn_found | bool
-
-        - name: Process username check results
-          set_fact:
-            available_upn_found: "{{ username_check.results[item.0].status | default(0) == 404 }}"
-            final_mail_nickname: "{{ default_mail_nickname }}{{ '' if item.0 == 0 else item.0 }}"
-          loop: "{{ range(0, username_check.results|length)|list | product([1]) | list }}"
-          loop_control:
-            label: "Processing result for {{ default_mail_nickname }}{{ '' if item.0 == 0 else item.0 }}"
-          when: 
-            - not available_upn_found | bool
-            - username_check.results[item.0].status is defined 
-            - username_check.results[item.0].status == 404
-          register: upn_processing
-
-        - name: Find first available username
-          set_fact:
-            available_upn_found: true
-            final_mail_nickname: "{{ (upn_processing.results | selectattr('ansible_facts', 'defined') | selectattr('ansible_facts.final_mail_nickname', 'defined') | list)[0].ansible_facts.final_mail_nickname }}"
-          when: upn_processing.results | selectattr('ansible_facts', 'defined') | selectattr('ansible_facts.final_mail_nickname', 'defined') | list | length > 0
-
-        - name: Use original username if no conflicts found
-          set_fact:
-            final_mail_nickname: "{{ default_mail_nickname }}"
-          when: final_mail_nickname == ""
-
-        - name: Debug final UPN
-          debug:
-            msg: "Final UPN will be: {{ final_mail_nickname }}@{{ domain }}"
+    # Improved username search with shell script approach
+    - name: Find available username
+      shell: |
+        #!/bin/bash
+        
+        # Parameters
+        ACCESS_TOKEN="{{ access_token }}"
+        BASE_NAME="{{ default_mail_nickname }}"
+        DOMAIN="{{ domain }}"
+        GRAPH_API="{{ graph_api_endpoint }}"
+        MAX_ATTEMPTS="{{ max_username_attempts }}"
+        
+        # First check the base username without any number
+        echo "Checking base username: ${BASE_NAME}@${DOMAIN}"
+        BASE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $ACCESS_TOKEN" \
+          -H "Content-Type: application/json" \
+          "${GRAPH_API}/users/${BASE_NAME}@${DOMAIN}")
+        
+        if [ "$BASE_STATUS" == "404" ]; then
+          echo "Base username available: ${BASE_NAME}"
+          echo "${BASE_NAME}"
+          exit 0
+        fi
+        
+        # Search for available username with incremental suffix
+        for i in $(seq 1 $MAX_ATTEMPTS); do
+          USERNAME="${BASE_NAME}${i}"
+          echo "Checking username: ${USERNAME}@${DOMAIN}"
+          
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            "${GRAPH_API}/users/${USERNAME}@${DOMAIN}")
+          
+          if [ "$STATUS" == "404" ]; then
+            echo "Found available username: ${USERNAME}"
+            echo "${USERNAME}"
+            exit 0
+          fi
+        done
+        
+        # If we reach here, no username was found
+        echo "ERROR: No available username found after ${MAX_ATTEMPTS} attempts"
+        exit 1
+      args:
+        executable: /bin/bash
+      register: username_search_result
+      failed_when: username_search_result.rc != 0
+    
+    - name: Set final mail nickname from search result
+      set_fact:
+        final_mail_nickname: "{{ username_search_result.stdout_lines[-1] }}"
+      when: username_search_result.rc == 0
+    
+    - name: Debug final username
+      debug:
+        msg: "Final username will be: {{ final_mail_nickname }}@{{ domain }}"
 
     - name: Create User in Azure AD
       uri:
