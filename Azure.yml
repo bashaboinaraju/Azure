@@ -58,6 +58,8 @@
         #!/bin/bash
         # Script to find first available username and create Azure AD user
         # Variables
+        start_number=1
+        max_number=25
         ACCESS_TOKEN="{{ access_token }}"
         BASE_NAME="{{ default_mail_nickname }}"
         DOMAIN="{{ domain }}"
