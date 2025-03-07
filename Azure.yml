@@ -195,7 +195,7 @@
               Authorization: "Bearer {{ access_token }}"
               Content-Type: "application/json"
             body:
-              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ username_search_result.json.id }}"
             body_format: json
             status_code: [204]
           when: 
@@ -247,7 +247,7 @@
               Authorization: "Bearer {{ access_token }}"
               Content-Type: "application/json"
             body:
-              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_creation.json.id }}"
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ username_search_result.json.id }}"
             body_format: json
             status_code: [204]
           loop: "{{ available_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
