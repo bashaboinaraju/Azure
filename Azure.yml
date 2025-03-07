@@ -94,8 +94,8 @@
           "accountEnabled": true,
           "displayName": "${DISPLAY_NAME}",
           "mailNickname": "${nickname}",
-          "givenName": "{{ first_name | default(default_user_name) }}"
-          "surname": "{{ last_name | default('') }}"
+          "givenName": "{{ first_name | default(default_user_name) }}",
+          "surname": "{{ last_name | default('') }}",
           "userPrincipalName": "${username}",
           "passwordProfile": {
             "forceChangePasswordNextSignIn": true,
@@ -111,8 +111,13 @@
             -d "$json_payload" \
             -X POST \
             "${GRAPH_API}/users")
+          
+          # Extract user ID and save both username and ID
+          user_id=$(echo "$response" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
           echo "User creation response: $response"
           echo "AVAILABLE_USERNAME=${username}" > /tmp/username_result.txt
+          echo "USER_ID=${user_id}" >> /tmp/username_result.txt
+          echo "MAIL_NICKNAME=${nickname}" >> /tmp/username_result.txt
         }
         # Main loop to find available username
         for ((i=${START_NUM}; i<=${MAX_NUM}; i++)); do
@@ -127,47 +132,36 @@
       args:
         executable: /bin/bash
       register: username_search_result
+      
     - name: Debug script result
       debug:
         msg: "{{ username_search_result.stdout_lines }}"
 
-    # - name: Create User in Azure AD
-    #   uri:
-    #     url: "{{ graph_api_endpoint }}/users"
-    #     method: POST
-    #     headers:
-    #       Authorization: "Bearer {{ access_token }}"
-    #       Content-Type: "application/json"
-    #     body:
-    #       accountEnabled: true
-    #       displayName: "{{ default_user_name }}"
-    #       givenName: "{{ first_name | default(default_user_name) }}"
-    #       surname: "{{ last_name | default('') }}"
-    #       mailNickname: "{{ final_mail_nickname }}"
-    #       userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
-    #       passwordProfile:
-    #         forceChangePasswordNextSignIn: true
-    #         password: "Default@1234"
-    #     body_format: json
-    #     status_code: [201, 200]
-    #   register: user_creation
-    #   failed_when: false
- 
-    - name: Detailed User Creation Debug
-      block:
-        - name: Debug User Creation Errors
-          debug:
-            msg: 
-              - "User Creation Status: {{ user_creation.status }}"
-              - "Response Body: {{ user_creation.json | default('No JSON response') }}"
-              - "Error Details: {{ user_creation.json.error.message | default('Unknown error') }}"
-          when: user_creation.status is defined and user_creation.status != 201
- 
-        - name: Fail Playbook if User Creation Critically Fails
-          fail:
-            msg: "User creation failed with status {{ user_creation.status }}: {{ user_creation.json.error.message | default('Unknown error') }}"
-          when: user_creation.status is defined and user_creation.status not in [200, 201]
-      when: user_creation.status is defined and user_creation.status not in [200, 201]
+    - name: Read username result file
+      slurp:
+        src: /tmp/username_result.txt
+      register: username_file_content_base64
+      when: username_search_result.rc == 0
+      
+    - name: Decode base64 content
+      set_fact:
+        username_file_content: "{{ username_file_content_base64.content | b64decode }}"
+      when: username_file_content_base64 is defined and username_file_content_base64.content is defined
+
+    - name: Extract user information
+      set_fact:
+        final_username: "{{ username_file_content | regex_search('AVAILABLE_USERNAME=(.*)\\n', '\\1') | first }}"
+        user_id: "{{ username_file_content | regex_search('USER_ID=(.*)\\n', '\\1') | first }}"
+        final_mail_nickname: "{{ username_file_content | regex_search('MAIL_NICKNAME=(.*)$', '\\1') | first }}"
+      when: username_file_content is defined
+      
+    - name: Debug extracted user info
+      debug:
+        msg:
+          - "Final Username: {{ final_username | default('Not extracted') }}"
+          - "User ID: {{ user_id | default('Not extracted') }}"
+          - "Mail Nickname: {{ final_mail_nickname | default('Not extracted') }}"
+      when: username_search_result.rc == 0
  
     - name: Group Assignment Block
       block:
@@ -195,12 +189,11 @@
               Authorization: "Bearer {{ access_token }}"
               Content-Type: "application/json"
             body:
-              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ username_search_result.json.id }}"
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_id }}"
             body_format: json
             status_code: [204]
           when: 
-            - user_creation.json is defined
-            - user_creation.json.id is defined
+            - user_id is defined
             - group_lookup is defined
             - group_lookup.json is defined
             - group_lookup.json.value | length > 0
@@ -210,8 +203,8 @@
           debug:
             msg: 
               - "Group Add Result: {{ group_add_result }}"
-              - "Group Assignment Status: {{ 'Successful' if group_add_result.status == 204 else 'Skipped or Failed' }}"
-      when: default_group_name is defined and default_group_name != ''
+              - "Group Assignment Status: {{ 'Successful' if group_add_result.status | default(0) == 204 else 'Skipped or Failed' }}"
+      when: default_group_name is defined and default_group_name != '' and user_id is defined
  
     - name: Role Assignment Block
       block:
@@ -247,15 +240,14 @@
               Authorization: "Bearer {{ access_token }}"
               Content-Type: "application/json"
             body:
-              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ username_search_result.json.id }}"
+              "@odata.id": "{{ graph_api_endpoint }}/directoryObjects/{{ user_id }}"
             body_format: json
             status_code: [204]
           loop: "{{ available_roles.json.value | selectattr('displayName', 'equalto', default_role_name) | list }}"
           loop_control:
             loop_var: active_role
           when: 
-            - user_creation.json is defined
-            - user_creation.json.id is defined
+            - user_id is defined
             - default_role_name is defined
             - default_role_name != ''
             - available_roles.json.value is defined
@@ -266,7 +258,7 @@
             msg: 
               - "Role Assignment Result: {{ role_assign_result }}"
               - "Role Assignment Status: {{ 'Successful' if role_assign_result.changed else 'Skipped or Failed' }}"
-      when: default_role_name is defined and default_role_name != ''
+      when: default_role_name is defined and default_role_name != '' and user_id is defined
  
     - name: Final Debug Information
       debug:
@@ -275,4 +267,4 @@
           - "Last Name: {{ last_name | default('Not Set') }}"
           - "Group: {{ default_group_name | default('No Group Specified') }}"
           - "Role: {{ default_role_name | default('No Role Specified') }}"
-          - "Final Username: {{ final_mail_nickname }}@{{ domain }}"
+          - "Final Username: {{ final_username | default('User not created') }}"
