@@ -94,6 +94,8 @@
           "accountEnabled": true,
           "displayName": "${DISPLAY_NAME}",
           "mailNickname": "${nickname}",
+          "givenName": "{{ first_name | default(default_user_name) }}"
+          "surname": "{{ last_name | default('') }}"
           "userPrincipalName": "${username}",
           "passwordProfile": {
             "forceChangePasswordNextSignIn": true,
@@ -129,27 +131,27 @@
       debug:
         msg: "{{ username_search_result.stdout_lines }}"
 
-    - name: Create User in Azure AD
-      uri:
-        url: "{{ graph_api_endpoint }}/users"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ access_token }}"
-          Content-Type: "application/json"
-        body:
-          accountEnabled: true
-          displayName: "{{ default_user_name }}"
-          givenName: "{{ first_name | default(default_user_name) }}"
-          surname: "{{ last_name | default('') }}"
-          mailNickname: "{{ final_mail_nickname }}"
-          userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
-          passwordProfile:
-            forceChangePasswordNextSignIn: true
-            password: "Default@1234"
-        body_format: json
-        status_code: [201, 200]
-      register: user_creation
-      failed_when: false
+    # - name: Create User in Azure AD
+    #   uri:
+    #     url: "{{ graph_api_endpoint }}/users"
+    #     method: POST
+    #     headers:
+    #       Authorization: "Bearer {{ access_token }}"
+    #       Content-Type: "application/json"
+    #     body:
+    #       accountEnabled: true
+    #       displayName: "{{ default_user_name }}"
+    #       givenName: "{{ first_name | default(default_user_name) }}"
+    #       surname: "{{ last_name | default('') }}"
+    #       mailNickname: "{{ final_mail_nickname }}"
+    #       userPrincipalName: "{{ final_mail_nickname }}@{{ domain }}"
+    #       passwordProfile:
+    #         forceChangePasswordNextSignIn: true
+    #         password: "Default@1234"
+    #     body_format: json
+    #     status_code: [201, 200]
+    #   register: user_creation
+    #   failed_when: false
  
     - name: Detailed User Creation Debug
       block:
