@@ -11,6 +11,8 @@
     client_secret: "PQZ8Q~XSmMsU4dbgk2KyWMHK1h8X7ciD~H.1_csi"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     domain: "amitomar63gmail.onmicrosoft.com"
+    start_number: 1
+    max_number: 100
     max_username_attempts: 100  # Maximum number of username attempts to check
   tasks:
     - name: Set Payload Variables
@@ -58,8 +60,6 @@
         #!/bin/bash
         # Script to find first available username and create Azure AD user
         # Variables
-        start_number=1
-        max_number=25
         ACCESS_TOKEN="{{ access_token }}"
         BASE_NAME="{{ default_mail_nickname }}"
         DOMAIN="{{ domain }}"
