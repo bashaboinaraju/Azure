@@ -299,92 +299,6 @@
               - "Role Assignment Result: {{ role_assign_result }}"
               - "Role Assignment Status: {{ 'Successful' if role_assign_result.changed else 'Skipped or Failed' }}"
       when: default_role_name is defined and default_role_name != '' and user_id is defined
-
-    # Fetch ServiceNow request items
-    # Replace the "Fetch Request Items from ServiceNow" task with this:
-    - name: Get ServiceNow Request Number from Payload
-      set_fact:
-        request_number: "{{ awx_webhook_payload.request_number | default('') }}"
-      
-    - name: Debug Request Number
-      debug:
-        msg: "Request Number from payload: {{ request_number | default('Not found') }}"
-    
-    # If request_number isn't in the payload, we can try to query by other criteria:
-    - name: Fetch Request Items from ServiceNow by User Information
-      uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=short_description=CONTAINS{{ default_user_name | urlencode }}"
-        method: GET
-        headers:
-          Accept: "application/json"
-        auth:
-          - "{{ servicenow_username }}"
-          - "{{ servicenow_password }}"
-        return_content: yes
-      register: req_item_info
-      when: username_search_result.rc == 0 and user_id is defined
- 
-    - name: Close Request Item in ServiceNow
-      uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item/{{ item.sys_id }}"
-        method: PATCH
-        headers:
-          Accept: "application/json"
-          Content-Type: "application/json"
-        auth:
-          - "{{ servicenow_username }}"
-          - "{{ servicenow_password }}"
-        body:
-          state: "3"  # 3 = Closed Complete
-          close_notes: "User successfully created in Azure AD with UPN: {{ final_username | default('User creation failed') }}"
-        body_format: json
-        status_code: [200, 204]
-      with_items: "{{ req_item_info.json.result }}"
-      when:
-        - username_search_result.rc == 0
-        - user_id is defined
-        - req_item_info is defined
-        - req_item_info.json is defined
-        - req_item_info.json.result is defined
-        - req_item_info.json.result | length > 0
-      register: req_item_close_result
-
-    - name: Debug Request Item Close Result
-      debug:
-        msg: "Request Item Close Result: {{ req_item_close_result }}"
-      when: req_item_close_result is defined
-
-    - name: Close Parent Request in ServiceNow
-      uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_request/{{ item.parent }}"
-        method: PATCH
-        headers:
-          Accept: "application/json"
-          Content-Type: "application/json"
-        auth:
-          - "{{ servicenow_username }}"
-          - "{{ servicenow_password }}"
-        body:
-          state: "3"  # 3 = Closed Complete
-          close_notes: "Azure AD user creation completed. Username: {{ final_username | default('User creation failed') }}"
-          work_notes: "User successfully created in Azure AD with details:\nDisplay Name: {{ default_user_name }}\nUsername: {{ final_username }}\nUser ID: {{ user_id }}"
-        body_format: json
-        status_code: [200, 204]
-      with_items: "{{ req_item_info.json.result }}"
-      when:
-        - username_search_result.rc == 0
-        - user_id is defined
-        - req_item_info is defined
-        - req_item_info.json is defined
-        - req_item_info.json.result is defined
-        - req_item_info.json.result | length > 0
-        - item.parent is defined
-      register: request_close_result
-
-    - name: Debug Parent Request Close Result
-      debug:
-        msg: "Parent Request Close Result: {{ request_close_result }}"
-      when: request_close_result is defined
  
     - name: Final Debug Information
       debug:
@@ -394,3 +308,16 @@
           - "Group: {{ default_group_name | default('No Group Specified') }}"
           - "Role: {{ default_role_name | default('No Role Specified') }}"
           - "Final Username: {{ final_username | default('User not created') }}"
+    - name: Get ServiceNow Sys ID from Payload
+      set_fact:
+        sn_req_item_id: "{{ awx_webhook_payload.servicenow_sys_id | default('') }}"
+    
+    - name: Close Request Item in ServiceNow Using Sys ID
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item/{{ sn_req_item_id }}"
+        method: PATCH
+        # rest of the code...
+      when:
+        - username_search_result.rc == 0
+        - user_id is defined
+        - sn_req_item_id is defined and sn_req_item_id != ''
