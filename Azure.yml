@@ -301,9 +301,19 @@
       when: default_role_name is defined and default_role_name != '' and user_id is defined
 
     # Fetch ServiceNow request items
-    - name: Fetch Request Items from ServiceNow
+    # Replace the "Fetch Request Items from ServiceNow" task with this:
+    - name: Get ServiceNow Request Number from Payload
+      set_fact:
+        request_number: "{{ awx_webhook_payload.request_number | default('') }}"
+      
+    - name: Debug Request Number
+      debug:
+        msg: "Request Number from payload: {{ request_number | default('Not found') }}"
+    
+    # If request_number isn't in the payload, we can try to query by other criteria:
+    - name: Fetch Request Items from ServiceNow by User Information
       uri:
-        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=request_number={{ request_number }}"
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=short_description=CONTAINS{{ default_user_name | urlencode }}"
         method: GET
         headers:
           Accept: "application/json"
@@ -312,7 +322,7 @@
           - "{{ servicenow_password }}"
         return_content: yes
       register: req_item_info
-      when: request_number is defined
+      when: username_search_result.rc == 0 and user_id is defined
  
     - name: Close Request Item in ServiceNow
       uri:
