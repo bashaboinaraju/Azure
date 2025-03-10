@@ -310,6 +310,10 @@
           - "Group: {{ default_group_name | default('No Group Specified') }}"
           - "Role: {{ default_role_name | default('No Role Specified') }}"
           - "Final Username: {{ final_username | default('User not created') }}"
+      - name: Debug Webhook Payload
+        debug:
+          var: awx_webhook_payload
+
     - name: Update ServiceNow record with license availability if user is created
       uri:
         url: "{{ servicenow_instance }}/api/now/table/{{ servicenow_table }}/{{ requested_sys_id }}"
