@@ -4,11 +4,11 @@
   gather_facts: no
   vars:
     servicenow_instance: "https://dev247928.service-now.com"
-    servicenow_username: "{{ lookup('env', 'service_now_username') }}"
-    servicenow_password: "{{ lookup('env', 'service_now_password') }}"
-    tenant_id: "{{ lookup('env', 'AZURE_TENANT_ID') }}"
-    client_id: "{{ lookup('env', 'AZURE_CLIENT_ID') }}"
-    client_secret: "{{ lookup('env', 'AZURE_CLIENT_SECRET') }}"
+    servicenow_username: "{{ service_now_username }}"
+    servicenow_password: "{{ service_now_password }}"
+    tenant_id: "{{ azure_tenant_id }}"
+    client_id: "{{ azure_client_id }}"
+    client_secret: "{{ azure_client_secret }}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     domain: "amitomar63gmail.onmicrosoft.com"
     start_number: 0  # Changed to 0 to check base name first
