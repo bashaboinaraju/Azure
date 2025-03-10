@@ -38,6 +38,10 @@
     - name: Set User Principal Name Format
       set_fact:
         default_mail_nickname: "{{ first_name }}.{{ last_name }}"
+    - name: Debug tenant_id
+      debug:
+        msg: "Tenant ID is {{ tenant_id }}"
+
  
     - name: Get Azure access token
       uri:
