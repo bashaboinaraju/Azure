@@ -299,6 +299,82 @@
               - "Role Assignment Result: {{ role_assign_result }}"
               - "Role Assignment Status: {{ 'Successful' if role_assign_result.changed else 'Skipped or Failed' }}"
       when: default_role_name is defined and default_role_name != '' and user_id is defined
+
+    # Fetch ServiceNow request items
+    - name: Fetch Request Items from ServiceNow
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item?sysparm_query=request_number={{ request_number }}"
+        method: GET
+        headers:
+          Accept: "application/json"
+        auth:
+          - "{{ servicenow_username }}"
+          - "{{ servicenow_password }}"
+        return_content: yes
+      register: req_item_info
+      when: request_number is defined
+ 
+    - name: Close Request Item in ServiceNow
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_req_item/{{ item.sys_id }}"
+        method: PATCH
+        headers:
+          Accept: "application/json"
+          Content-Type: "application/json"
+        auth:
+          - "{{ servicenow_username }}"
+          - "{{ servicenow_password }}"
+        body:
+          state: "3"  # 3 = Closed Complete
+          close_notes: "User successfully created in Azure AD with UPN: {{ final_username | default('User creation failed') }}"
+        body_format: json
+        status_code: [200, 204]
+      with_items: "{{ req_item_info.json.result }}"
+      when:
+        - username_search_result.rc == 0
+        - user_id is defined
+        - req_item_info is defined
+        - req_item_info.json is defined
+        - req_item_info.json.result is defined
+        - req_item_info.json.result | length > 0
+      register: req_item_close_result
+
+    - name: Debug Request Item Close Result
+      debug:
+        msg: "Request Item Close Result: {{ req_item_close_result }}"
+      when: req_item_close_result is defined
+
+    - name: Close Parent Request in ServiceNow
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/sc_request/{{ item.parent }}"
+        method: PATCH
+        headers:
+          Accept: "application/json"
+          Content-Type: "application/json"
+        auth:
+          - "{{ servicenow_username }}"
+          - "{{ servicenow_password }}"
+        body:
+          state: "3"  # 3 = Closed Complete
+          close_notes: "Azure AD user creation completed. Username: {{ final_username | default('User creation failed') }}"
+          work_notes: "User successfully created in Azure AD with details:\nDisplay Name: {{ default_user_name }}\nUsername: {{ final_username }}\nUser ID: {{ user_id }}"
+        body_format: json
+        status_code: [200, 204]
+      with_items: "{{ req_item_info.json.result }}"
+      when:
+        - username_search_result.rc == 0
+        - user_id is defined
+        - req_item_info is defined
+        - req_item_info.json is defined
+        - req_item_info.json.result is defined
+        - req_item_info.json.result | length > 0
+        - item.parent is defined
+      register: request_close_result
+
+    - name: Debug Parent Request Close Result
+      debug:
+        msg: "Parent Request Close Result: {{ request_close_result }}"
+      when: request_close_result is defined
  
     - name: Final Debug Information
       debug:
