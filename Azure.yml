@@ -6,9 +6,9 @@
     servicenow_instance: "https://dev247928.service-now.com"
     servicenow_username: "{{ lookup('env', 'SERVICENOW_USERNAME') }}"
     servicenow_password: "{{ lookup('env', 'SERVICENOW_PASSWORD') }}"
-    tenant_id: "{{ lookup('env', 'AZURE_TENANT_ID') }}"
-    client_id: "{{ lookup('env', 'AZURE_CLIENT_ID') }}"
-    client_secret: "{{ lookup('env', 'AZURE_CLIENT_SECRET') }}"
+    tenant_id: "{{ lookup('env', 'azure_tenant_id') }}"
+    client_id: "{{ lookup('env', 'azure_client_id') }}"
+    client_secret: "{{ lookup('env', 'azure_client_secret') }}"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     domain: "amitomar63gmail.onmicrosoft.com"
     start_number: 0  # Changed to 0 to check base name first
