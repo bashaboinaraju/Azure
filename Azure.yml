@@ -9,6 +9,8 @@
     tenant_id: "{{ azure_tenant_id }}"
     client_id: "{{ azure_client_id }}"
     client_secret: "{{ azure_client_secret }}"
+    requested_sys_id: "{{ awx_webhook_payload.sysid }}"
+    servicenow_table: "sc_req_item"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     domain: "amitomar63gmail.onmicrosoft.com"
     start_number: 0  # Changed to 0 to check base name first
@@ -308,4 +310,16 @@
           - "Group: {{ default_group_name | default('No Group Specified') }}"
           - "Role: {{ default_role_name | default('No Role Specified') }}"
           - "Final Username: {{ final_username | default('User not created') }}"
-    
+    - name: Update ServiceNow record with license availability if user is created
+      uri:
+        url: "{{ servicenow_instance }}/api/now/table/{{ servicenow_table }}/{{ requested_sys_id }}"
+        method: PATCH
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        body:
+          correlation_id: "is_available"
+        body_format: json
+        return_content: yes
+      when: username_search_result.status == 201
+      
