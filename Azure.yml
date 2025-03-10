@@ -321,5 +321,5 @@
           correlation_id: "is_available"
         body_format: json
         return_content: yes
-      when: username_search_result.rc == 0 
+      when: username_search_result.rc == 0
       
