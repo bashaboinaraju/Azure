@@ -4,8 +4,8 @@
   gather_facts: no
   vars:
     servicenow_instance: "https://dev247928.service-now.com"
-    servicenow_username: "{{ lookup('env', 'SERVICENOW_USERNAME') }}"
-    servicenow_password: "{{ lookup('env', 'SERVICENOW_PASSWORD') }}"
+    servicenow_username: "{{ lookup('env', 'service_now_username') }}"
+    servicenow_password: "{{ lookup('env', 'service_now_password') }}"
     tenant_id: "{{ lookup('env', 'azure_tenant_id') }}"
     client_id: "{{ lookup('env', 'azure_client_id') }}"
     client_secret: "{{ lookup('env', 'azure_client_secret') }}"
