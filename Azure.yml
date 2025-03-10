@@ -9,7 +9,7 @@
     tenant_id: "{{ azure_tenant_id }}"
     client_id: "{{ azure_client_id }}"
     client_secret: "{{ azure_client_secret }}"
-    requested_sys_id: "{{ awx_webhook_payload.sysid }}"
+    requested_sys_id: "{{ awx_webhook_payload.sysId }}"
     servicenow_table: "sc_req_item"
     graph_api_endpoint: "https://graph.microsoft.com/v1.0"
     domain: "amitomar63gmail.onmicrosoft.com"
