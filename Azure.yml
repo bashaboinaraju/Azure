@@ -316,7 +316,18 @@
       uri:
         url: "{{ servicenow_instance }}/api/now/table/sc_req_item/{{ sn_req_item_id }}"
         method: PATCH
-        # rest of the code...
+        headers:
+          Accept: "application/json"
+          Content-Type: "application/json"
+        auth:
+          - "{{ servicenow_username }}"
+          - "{{ servicenow_password }}"
+        body:
+          state: "3"  # 3 = Closed Complete
+          close_notes: "User successfully created in Azure AD with UPN: {{ final_username | default('User creation failed') }}"
+        body_format: json
+        status_code: [200, 204]
+      with_items: "{{ req_item_info.json.result }}"
       when:
         - username_search_result.rc == 0
         - user_id is defined
