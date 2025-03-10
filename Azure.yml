@@ -311,6 +311,8 @@
     - name: Get ServiceNow Sys ID from Payload
       set_fact:
         sn_req_item_id: "{{ awx_webhook_payload.servicenow_sys_id | default('') }}"
+      msg:
+        - "sn_req_item_id:{{sn_req_item_id}}"
     
     - name: Close Request Item in ServiceNow Using Sys ID
       uri:
